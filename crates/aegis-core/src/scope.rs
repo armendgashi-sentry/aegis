@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
 use ipnet::IpNet;
@@ -18,6 +18,69 @@ pub struct TargetScope {
     pub exclusions: Vec<String>,
 }
 
+/// Normalize a host string by resolving obfuscated IP representations.
+///
+/// Handles:
+/// - Standard dotted-quad: "127.0.0.1" (passthrough)
+/// - Decimal integer: "2130706433" → "127.0.0.1"
+/// - Hex integer: "0x7f000001" → "127.0.0.1"
+/// - Octal-prefixed octets: "0177.0.0.01" → "127.0.0.1"
+/// - Domain names: returned as-is
+pub fn normalize_host(host: &str) -> String {
+    let host = host.trim();
+
+    // Already a valid IP? Return as-is.
+    if IpAddr::from_str(host).is_ok() {
+        return host.to_string();
+    }
+
+    // Try decimal integer (e.g. "2130706433" → 127.0.0.1)
+    if let Ok(n) = host.parse::<u32>() {
+        return IpAddr::V4(Ipv4Addr::from(n)).to_string();
+    }
+
+    // Try hex integer (e.g. "0x7f000001" → 127.0.0.1)
+    if let Some(hex) = host.strip_prefix("0x").or_else(|| host.strip_prefix("0X")) {
+        if let Ok(n) = u32::from_str_radix(hex, 16) {
+            return IpAddr::V4(Ipv4Addr::from(n)).to_string();
+        }
+    }
+
+    // Try octal-prefixed octets (e.g. "0177.0.0.01")
+    if host.contains('.') {
+        let parts: Vec<&str> = host.split('.').collect();
+        if parts.len() == 4 {
+            let mut octets = [0u8; 4];
+            let mut all_ok = true;
+            for (i, part) in parts.iter().enumerate() {
+                let val = if let Some(oct) = part.strip_prefix('0') {
+                    if oct.is_empty() {
+                        Some(0u8)
+                    } else {
+                        u8::from_str_radix(oct, 8).ok()
+                    }
+                } else {
+                    part.parse::<u8>().ok()
+                };
+                match val {
+                    Some(v) => octets[i] = v,
+                    None => {
+                        all_ok = false;
+                        break;
+                    }
+                }
+            }
+            if all_ok {
+                return IpAddr::V4(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
+                    .to_string();
+            }
+        }
+    }
+
+    // Not an obfuscated IP — return as-is (domain name)
+    host.to_string()
+}
+
 impl TargetScope {
     /// Check if a host:port combination is within the authorized scope.
     /// Returns true if scope is empty (no restrictions).
@@ -26,6 +89,10 @@ impl TargetScope {
         if self.targets.is_empty() {
             return true;
         }
+
+        // Normalize host to resolve IP obfuscation (decimal, hex, octal)
+        let normalized = normalize_host(host);
+        let host = normalized.as_str();
 
         // Check exclusions first
         if self.matches_any(host, &self.exclusions) {
@@ -156,5 +223,61 @@ mod tests {
         let s = scope(&["10.0.1.0/24"], &[80], &["10.0.1.1"]);
         assert!(s.is_in_scope("10.0.1.50", 80));
         assert!(!s.is_in_scope("10.0.1.1", 80));
+    }
+
+    // =========================================================================
+    // IP obfuscation normalization
+    // =========================================================================
+
+    #[test]
+    fn normalize_decimal_ip() {
+        assert_eq!(normalize_host("2130706433"), "127.0.0.1");
+        assert_eq!(normalize_host("167772161"), "10.0.0.1");
+    }
+
+    #[test]
+    fn normalize_hex_ip() {
+        assert_eq!(normalize_host("0x7f000001"), "127.0.0.1");
+        assert_eq!(normalize_host("0X7F000001"), "127.0.0.1");
+    }
+
+    #[test]
+    fn normalize_octal_ip() {
+        assert_eq!(normalize_host("0177.0.0.01"), "127.0.0.1");
+    }
+
+    #[test]
+    fn normalize_passthrough() {
+        assert_eq!(normalize_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(normalize_host("app.acme.com"), "app.acme.com");
+    }
+
+    #[test]
+    fn scope_blocks_decimal_ip_obfuscation() {
+        let s = scope(&["127.0.0.1"], &[8888], &[]);
+        // Standard IP — in scope
+        assert!(s.is_in_scope("127.0.0.1", 8888));
+        // Decimal obfuscation — should be normalized and matched
+        assert!(s.is_in_scope("2130706433", 8888));
+    }
+
+    #[test]
+    fn scope_blocks_hex_ip_obfuscation() {
+        let s = scope(&["127.0.0.1"], &[8888], &[]);
+        assert!(s.is_in_scope("0x7f000001", 8888));
+    }
+
+    #[test]
+    fn scope_blocks_obfuscated_cidr() {
+        let s = scope(&["10.0.1.0/24"], &[80], &[]);
+        // 10.0.1.50 = 167772466
+        assert!(s.is_in_scope("167772466", 80));
+    }
+
+    #[test]
+    fn scope_exclusion_catches_obfuscated_ip() {
+        let s = scope(&["10.0.1.0/24"], &[80], &["10.0.1.1"]);
+        // 10.0.1.1 = 167772161 — should be excluded even when obfuscated
+        assert!(!s.is_in_scope("167772161", 80));
     }
 }

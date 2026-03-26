@@ -6,6 +6,8 @@ const WS_URL = `ws://${window.location.host}/api/live`;
 let events = [];
 let currentFilter = 'all';
 let eventCount = 0;
+let allowedCount = 0;
+let deniedCount = 0;
 let lastSecondCount = 0;
 let rpsInterval = null;
 
@@ -68,14 +70,15 @@ function handleEvent(entry) {
 
   eventCount++;
   lastSecondCount++;
+  if (entry.decision === 'allow') allowedCount++;
+  else if (entry.decision === 'deny') deniedCount++;
 
-  // Update stats
-  const allowed = events.filter(e => e.decision === 'allow').length;
-  const denied = events.filter(e => e.decision === 'deny').length;
-
-  statTotal.textContent = eventCount;
-  statAllowed.textContent = allowed;
-  statDenied.textContent = denied;
+  // Update stats (only if viewing live feed)
+  if (currentMode === 'live') {
+    statTotal.textContent = eventCount;
+    statAllowed.textContent = allowedCount;
+    statDenied.textContent = deniedCount;
+  }
   eventCountEl.textContent = `${eventCount} events`;
 
   renderNewEvent(entry);
@@ -318,16 +321,13 @@ rpsInterval = setInterval(() => {
   lastSecondCount = 0;
 }, 1000);
 
-// Fetch initial stats
+// Fetch stats from API (used by logs mode, not live feed)
 async function fetchStats() {
   try {
     const resp = await fetch(`${API_BASE}/api/stats`);
-    const data = await resp.json();
-    statTotal.textContent = data.total || 0;
-    statAllowed.textContent = data.allowed || 0;
-    statDenied.textContent = data.denied || 0;
+    return await resp.json();
   } catch (e) {
-    // Stats endpoint may not be ready yet
+    return null;
   }
 }
 
@@ -346,7 +346,13 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.getElementById('live-section').style.display = currentMode === 'live' ? '' : 'none';
     document.getElementById('logs-section').style.display = currentMode === 'logs' ? '' : 'none';
 
-    if (currentMode === 'logs') {
+    if (currentMode === 'live') {
+      // Restore live session stats to main cards
+      statTotal.textContent = eventCount;
+      statAllowed.textContent = allowedCount;
+      statDenied.textContent = deniedCount;
+      statRps.textContent = lastSecondCount;
+    } else if (currentMode === 'logs') {
       fetchLogFiles();
     }
   });
@@ -413,12 +419,16 @@ async function fetchLogEntries(file) {
 
     logEntries = data.entries || [];
 
-    // Update log stats
+    // Update log stats (inline + main stat cards)
     if (data.stats) {
       logStats.style.display = '';
       document.getElementById('log-stat-total').textContent = data.stats.total || 0;
       document.getElementById('log-stat-allowed').textContent = data.stats.allowed || 0;
       document.getElementById('log-stat-denied').textContent = data.stats.denied || 0;
+      // Also update main stat cards to reflect loaded log
+      statTotal.textContent = data.stats.total || 0;
+      statAllowed.textContent = data.stats.allowed || 0;
+      statDenied.textContent = data.stats.denied || 0;
     }
 
     // Set "ALL" filter as active
@@ -459,6 +469,5 @@ function renderLogEntries() {
   });
 }
 
-// Initialize
-fetchStats();
+// Initialize — live feed starts at 0, counts only new WebSocket events
 connect();

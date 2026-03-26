@@ -44,67 +44,38 @@ impl SandboxBackend for SeatbeltBackend {
 }
 
 /// Generate an SBPL profile string from the resolved sandbox policy.
+///
+/// Strategy: `(deny default)` with broad capability allows + selective network.
+/// In Seatbelt, deny always beats allow at equal specificity, so we use:
+///   - `(deny default)` as the baseline
+///   - Broad `(allow process*)(allow file*)(allow mach*)...` for non-network ops
+///   - Selective `(allow network-outbound (remote tcp "localhost:<port>"))` for network
+///   - Explicit `(deny file-read*)(deny file-write*)` for sensitive paths (these win
+///     over the broad `(allow file*)` because deny beats allow)
 fn generate_profile(policy: &ResolvedSandboxPolicy) -> Result<String, SandboxError> {
     let mut profile = String::new();
 
-    // Header: deny everything by default
     profile.push_str("(version 1)\n");
     profile.push_str("(deny default)\n");
 
-    // --- Process ---
+    // --- Broad capability allows (everything except network) ---
+    profile.push_str("\n;; Process, IPC, system capabilities\n");
     if policy.allow_exec {
-        profile.push_str("(allow process-exec)\n");
-        profile.push_str("(allow process-fork)\n");
+        profile.push_str("(allow process*)\n");
     }
     profile.push_str("(allow signal)\n");
-    profile.push_str("(allow process-info*)\n");
+    profile.push_str("(allow sysctl*)\n");
+    profile.push_str("(allow mach*)\n");
+    profile.push_str("(allow ipc*)\n");
+    profile.push_str("(allow system*)\n");
 
-    // --- System essentials (required for most programs to function) ---
-    profile.push_str("\n;; System essentials\n");
-    profile.push_str("(allow sysctl-read)\n");
-    profile.push_str("(allow mach-lookup)\n");
-    profile.push_str("(allow mach-register)\n");
-    profile.push_str("(allow ipc-posix-shm-read*)\n");
-    profile.push_str("(allow ipc-posix-shm-write-create)\n");
-    profile.push_str("(allow ipc-posix-shm-write-data)\n");
+    // --- Filesystem: broad allow, then targeted denials ---
+    profile.push_str("\n;; Filesystem (broad allow + targeted deny)\n");
+    profile.push_str("(allow file*)\n");
 
-    // System libraries and binaries (read-only)
-    profile.push_str("\n;; System read-only paths\n");
-    for sys_path in &[
-        "/usr", "/bin", "/sbin", "/Library", "/System",
-        "/private/var/db", "/private/etc", "/etc",
-        "/dev", "/var/run", "/var/folders",
-    ] {
-        profile.push_str(&format!(
-            "(allow file-read* (subpath \"{}\"))\n",
-            sys_path
-        ));
-    }
-
-    // Allow reading the user's home essentials (shells, configs needed by tools)
-    if let Some(home) = dirs::home_dir() {
-        let home_str = home.display();
-        for sub in &[".config", ".local", ".cargo", ".nvm", ".npm", ".rustup"] {
-            let p = home.join(sub);
-            if p.exists() {
-                profile.push_str(&format!(
-                    "(allow file-read* (subpath \"{}\"))\n",
-                    p.display()
-                ));
-            }
-        }
-        // Shell rc files
-        for rc in &[".zshrc", ".bashrc", ".profile", ".zprofile", ".bash_profile"] {
-            profile.push_str(&format!(
-                "(allow file-read* (literal \"{}/{}\"))\n",
-                home_str, rc
-            ));
-        }
-    }
-
-    // --- Deny paths (before allow, so deny wins for overlapping paths) ---
+    // Deny sensitive paths (deny beats allow in Seatbelt)
     if !policy.deny.is_empty() {
-        profile.push_str("\n;; Denied paths\n");
+        profile.push_str("\n;; Denied filesystem paths\n");
         for path in &policy.deny {
             let abs = canonicalize_or_keep(path);
             profile.push_str(&format!(
@@ -118,68 +89,29 @@ fn generate_profile(policy: &ResolvedSandboxPolicy) -> Result<String, SandboxErr
         }
     }
 
-    // --- Read-only paths ---
-    if !policy.read_only.is_empty() {
-        profile.push_str("\n;; Read-only paths\n");
-        for path in &policy.read_only {
-            let abs = canonicalize_or_keep(path);
-            profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
-                abs.display()
-            ));
-        }
-    }
-
-    // --- Read-write paths ---
-    if !policy.read_write.is_empty() {
-        profile.push_str("\n;; Read-write paths\n");
-        for path in &policy.read_write {
-            let abs = canonicalize_or_keep(path);
-            profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
-                abs.display()
-            ));
-            profile.push_str(&format!(
-                "(allow file-write* (subpath \"{}\"))\n",
-                abs.display()
-            ));
-        }
-    }
-
-    // --- Temp directory ---
-    if policy.allow_tmp {
-        profile.push_str("\n;; Temp directory\n");
-        let tmp = std::env::temp_dir();
-        profile.push_str(&format!(
-            "(allow file-read* (subpath \"{}\"))\n",
-            tmp.display()
-        ));
-        profile.push_str(&format!(
-            "(allow file-write* (subpath \"{}\"))\n",
-            tmp.display()
-        ));
-        // macOS also uses /private/tmp
-        profile.push_str("(allow file-read* (subpath \"/private/tmp\"))\n");
-        profile.push_str("(allow file-write* (subpath \"/private/tmp\"))\n");
-    }
-
-    // --- Network ---
-    profile.push_str("\n;; Network\n");
+    // --- Network: selective outbound only ---
+    profile.push_str("\n;; Network isolation\n");
     if policy.deny_all_network && policy.allow_connect.is_empty() {
-        // Deny all network — nothing to add
+        // Complete network lockdown — deny default already covers this
         profile.push_str(";; All network denied\n");
     } else if policy.deny_all_network {
-        // Only allow explicit connections
-        profile.push_str("(allow network* (local udp))\n"); // DNS still needed
-        profile.push_str("(allow network-outbound (remote udp \"*:53\"))\n");
+        // Selective network: only allow connections to specific ports.
+        // DNS and local bind/inbound are needed for basic functionality.
+        profile.push_str("(allow network-outbound (remote udp))\n");
+        profile.push_str("(allow network-bind)\n");
+        profile.push_str("(allow network-inbound)\n");
         for addr in &policy.allow_connect {
+            // Seatbelt requires host to be "*" or "localhost" — convert 127.0.0.1
+            let seatbelt_addr = addr
+                .replace("127.0.0.1:", "localhost:")
+                .replace("0.0.0.0:", "localhost:");
             profile.push_str(&format!(
                 "(allow network-outbound (remote tcp \"{}\"))\n",
-                addr
+                seatbelt_addr
             ));
         }
     } else {
-        // Allow all network (proxy handles policy enforcement)
+        // All network allowed — proxy handles enforcement
         profile.push_str("(allow network*)\n");
     }
 
@@ -205,8 +137,8 @@ mod tests {
 
         assert!(profile.contains("(version 1)"));
         assert!(profile.contains("(deny default)"));
-        assert!(profile.contains("(allow process-exec)"));
-        assert!(profile.contains("(allow file-read*"));
+        assert!(profile.contains("(allow file*)"));
+        assert!(profile.contains("(allow mach*)"));
         // Denied paths
         assert!(profile.contains(".ssh"));
     }
@@ -220,7 +152,10 @@ mod tests {
         let resolved = policy.resolve_paths(Path::new("/tmp/test"));
         let profile = generate_profile(&resolved).unwrap();
 
-        assert!(profile.contains("(allow network-outbound (remote tcp \"127.0.0.1:19000\"))"));
+        // deny default is the baseline; selective allows for specific ports
+        assert!(profile.contains("(deny default)"));
+        assert!(profile.contains("(allow network-outbound (remote tcp \"localhost:19000\"))"));
+        // Should NOT have broad network allow
         assert!(!profile.contains("(allow network*)"));
     }
 
@@ -230,6 +165,7 @@ mod tests {
         let resolved = policy.resolve_paths(Path::new("/tmp/test"));
         let profile = generate_profile(&resolved).unwrap();
 
+        // When network is not denied, broad network allow is present
         assert!(profile.contains("(allow network*)"));
     }
 }

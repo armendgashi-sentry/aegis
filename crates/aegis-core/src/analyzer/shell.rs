@@ -165,10 +165,22 @@ impl ShellCommandAnalyzer {
             "https_proxy=\"\"",
             "http_proxy= ",
             "https_proxy= ",
+            // NO_PROXY / no_proxy bypass
+            "no_proxy=",
         ];
         for pat in &unset_patterns {
             if lower.contains(pat) {
                 return Some(format!("Proxy bypass attempt: {pat}"));
+            }
+        }
+
+        // Catch `export HTTP_PROXY=;` and `http_proxy=;` (semicolon-terminated empty assignment)
+        for var in &["http_proxy", "https_proxy", "all_proxy"] {
+            // export VAR=; or VAR=;
+            if lower.contains(&format!("{var}=;"))
+                || lower.contains(&format!("{var}= ;"))
+            {
+                return Some(format!("Proxy bypass attempt: {var} cleared"));
             }
         }
 
@@ -397,6 +409,26 @@ mod tests {
     #[test]
     fn blocks_env_unset_proxy() {
         assert!(analyze("env --unset=HTTP_PROXY --unset=HTTPS_PROXY curl https://example.com").unwrap().is_deny());
+    }
+
+    #[test]
+    fn blocks_no_proxy_wildcard() {
+        assert!(analyze("NO_PROXY=* curl http://evil.com/data").unwrap().is_deny());
+    }
+
+    #[test]
+    fn blocks_no_proxy_specific() {
+        assert!(analyze("no_proxy=127.0.0.1 curl http://127.0.0.1:8888/api").unwrap().is_deny());
+    }
+
+    #[test]
+    fn blocks_export_proxy_clear_semicolon() {
+        assert!(analyze("export HTTP_PROXY=; curl http://127.0.0.1:8888/api/users").unwrap().is_deny());
+    }
+
+    #[test]
+    fn blocks_proxy_clear_semicolon() {
+        assert!(analyze("http_proxy=; curl http://127.0.0.1:8888/api").unwrap().is_deny());
     }
 
     // --- Allowlist: safe commands that must NOT trigger ---

@@ -1,27 +1,57 @@
-# Build
+# Build artifacts
 /target/
+debug/
+release/
 
-# Session logs
+# Rust
+**/*.rs.bk
+*.pdb
+
+# Node / TypeScript SDK
+node_modules/
+sdks/typescript/dist/
+sdks/typescript/*.tsbuildinfo
+
+# Python SDK
+__pycache__/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+**/.pytest_cache/
+sdks/python/dist/
+sdks/python/build/
+*.pyc
+*.pyo
+.venv/
+
+# Logs and session files
+*.log
 logs/
 *.jsonl
 
-# Generated CA certs
+# Secrets and credentials (NEVER commit)
+secrets.yaml
+secrets.yml
+.env
+.env.*
 *.pem
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+*.key
 
 # OS
 .DS_Store
 Thumbs.db
 
+# Editor / IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
 # Aegis runtime
 .aegis-hooks.json
+.claude/settings.local.json
 
-# Node (web UI dev)
-node_modules/
+# Web UI dev artifacts
 web/dist/

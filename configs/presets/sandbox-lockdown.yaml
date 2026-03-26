@@ -1,0 +1,17 @@
+sandbox:
+  enabled: true
+  filesystem:
+    read_only: ["."]
+    read_write: ["."]
+    deny:
+      - "~/.ssh"
+      - "~/.aws"
+      - "~/.gnupg"
+    allow_tmp: true
+  network:
+    # LOCKDOWN: deny all network except Aegis proxy/guard/web (auto-added at runtime)
+    # The agent can ONLY reach the Aegis services — no direct connections to targets.
+    allow_connect: []
+    deny_all: true
+  process:
+    allow_exec: true

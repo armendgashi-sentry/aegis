@@ -527,6 +527,7 @@ Presets are predefined policy configurations in `configs/presets/`. Apply at ini
 |--------|-----------|---------|-------------|
 | `sandbox-standard` | Full project read-write | Open (proxy enforces policy) | `~/.ssh`, `~/.aws`, `~/.gnupg` |
 | `sandbox-strict` | Read-only project, write to `./output`, `./reports`, `./loot` | Ports 80/443 only | `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.kube`, `~/.docker` |
+| `sandbox-lockdown` | Full project read-write | All denied except Aegis ports (auto-added) | `~/.ssh`, `~/.aws`, `~/.gnupg` |
 
 ```bash
 # Apply at init
@@ -817,6 +818,63 @@ With the default policy, the sandboxed agent **cannot**:
 - Access files outside the project directory and system paths
 - (With `deny_all: true`) Make direct network connections bypassing the proxy
 
+### Network Isolation (Lockdown Mode)
+
+With `sandbox-lockdown.yaml` (`deny_all: true`, empty `allow_connect`), the sandbox blocks **all** direct network connections at the kernel level. The only allowed outbound TCP is to Aegis services (auto-added: proxy `:19000`, guard `:19001`, web `:19002`). This forces all traffic through the proxy:
+
+| Bypass Vector | Result |
+|---------------|--------|
+| Direct `curl` to target | Blocked by sandbox (exit code 7) |
+| `--noproxy '*'` flag | Blocked by sandbox |
+| Python `urllib.request.urlopen()` | `Operation not permitted` |
+| Python raw `socket.connect()` | `Operation not permitted` |
+| Direct to out-of-scope host | Blocked by sandbox |
+| IP obfuscation (decimal/hex) direct | Blocked by sandbox |
+| `~/.ssh/id_rsa` read | Blocked by sandbox |
+
+Traffic routed through the proxy still goes through scope + method + payload policy checks.
+
+---
+
+## Filesystem Snapshots
+
+Aegis can capture filesystem state before the agent runs and offer a diff/rollback after.
+
+### Usage
+
+```bash
+# Take a snapshot before the agent runs
+aegis run --snapshot claude -- --dangerously-skip-permissions
+
+# Choose snapshot method (default: auto-detect)
+aegis run --snapshot --snapshot-method git claude
+```
+
+After the agent exits, Aegis shows a diff of all filesystem changes and prompts:
+- **Accept** — keep the changes
+- **Rollback** — revert to the pre-agent state
+- **Diff** — show detailed file-by-file changes
+
+### Backends
+
+| Method | Platform | Mechanism |
+|--------|----------|-----------|
+| `git` | Cross-platform | Temporary branch + commit, rollback via `git checkout` |
+| `auto` | Any | Uses the best available backend |
+
+### API
+
+Snapshots can also be managed via the SDK:
+
+```python
+client = AegisClient()
+snapshot = client.create_snapshot()
+# ... agent runs ...
+diff = client.snapshot_diff(snapshot.id)
+print(f"Added: {len(diff.added)}, Modified: {len(diff.modified)}, Deleted: {len(diff.deleted)}")
+client.snapshot_rollback(snapshot.id)  # or client.snapshot_commit(snapshot.id)
+```
+
 ---
 
 ## Agent Integration
@@ -916,7 +974,7 @@ export NODE_EXTRA_CA_CERTS=~/.config/aegis/ca.pem
 
 ## SDK / API
 
-Aegis exposes HTTP endpoints at `:19002` for programmatic policy evaluation. These are designed for building Python/TypeScript SDKs and integrating with agent frameworks (LangChain, CrewAI, OpenAI Agents SDK, Vercel AI SDK, MCP).
+Aegis exposes HTTP endpoints at `:19002` for programmatic policy evaluation and provides official Python and TypeScript SDKs for integrating with agent frameworks (LangChain, CrewAI, OpenAI Agents SDK, Vercel AI SDK, MCP).
 
 ### Evaluate Shell Commands
 
@@ -949,87 +1007,95 @@ curl -X POST http://127.0.0.1:19002/api/evaluate/http \
 | `/api/evaluate/shell` | POST | Evaluate a shell command. Body: `{command, tool_name?, cwd?}` |
 | `/api/evaluate/http` | POST | Evaluate an HTTP request. Body: `{method, url, headers?, body?}` |
 | `/api/secrets/status` | GET | List configured secret rules (no values exposed) |
+| `/api/snapshot/create` | POST | Create a filesystem snapshot |
+| `/api/snapshot/{id}/diff` | GET | Show changes since snapshot |
+| `/api/snapshot/{id}/rollback` | POST | Revert to snapshot |
+| `/api/snapshot/{id}/commit` | POST | Accept changes |
 | `/api/stats` | GET | Summary stats (total, allowed, denied) |
 | `/api/health` | GET | Health check |
 | `/api/logs` | GET | List available audit log files |
 | `/api/logs/entries` | GET | Read parsed log entries with filtering |
 | `/api/live` | WS | Real-time event stream via WebSocket |
 
-### Python SDK Usage (Example)
+### Python SDK (`sdks/python/`)
 
-```python
-import httpx
-
-AEGIS_URL = "http://127.0.0.1:19002"
-
-def check_shell(command: str) -> bool:
-    """Returns True if the command is allowed."""
-    r = httpx.post(f"{AEGIS_URL}/api/evaluate/shell", json={
-        "command": command,
-        "tool_name": "Bash",
-    })
-    return r.json()["decision"] == "allow"
-
-def check_http(method: str, url: str, headers: dict = None, body: str = None) -> bool:
-    """Returns True if the HTTP request is allowed."""
-    r = httpx.post(f"{AEGIS_URL}/api/evaluate/http", json={
-        "method": method,
-        "url": url,
-        "headers": headers or {},
-        "body": body,
-    })
-    return r.json()["decision"] == "allow"
-
-# Usage with any agent framework
-if check_shell("rm -rf /tmp"):
-    run_command("rm -rf /tmp")
-else:
-    print("Blocked by Aegis")
-
-# LangChain tool guard example
-from langchain.tools import tool
-
-@tool
-def shell_exec(command: str) -> str:
-    """Execute a shell command (guarded by Aegis)."""
-    if not check_shell(command):
-        return "Command blocked by Aegis policy"
-    return subprocess.check_output(command, shell=True).decode()
+```bash
+cd sdks/python && pip install -e .
 ```
 
-### TypeScript SDK Usage (Example)
+```python
+from aegis import AegisClient, guarded_tool
+
+client = AegisClient()  # connects to localhost:19002
+
+# Direct evaluation
+verdict = client.evaluate_shell("rm -rf /tmp/data")
+assert verdict.decision == "deny"
+
+verdict = client.evaluate_http("DELETE", "https://target.com/api/users/1")
+assert verdict.decision == "deny"
+
+# Decorator — automatically checks commands before execution
+@guarded_tool
+def run_shell(command: str) -> str:
+    return subprocess.check_output(command, shell=True).decode()
+
+# Snapshot lifecycle
+snapshot = client.create_snapshot()
+# ... agent does work ...
+diff = client.snapshot_diff(snapshot.id)
+client.snapshot_rollback(snapshot.id)  # or client.snapshot_commit(snapshot.id)
+```
+
+**Framework adapters:**
+
+```python
+# LangChain
+from aegis.adapters.langchain import AegisCallbackHandler
+agent = create_agent(callbacks=[AegisCallbackHandler()])
+
+# OpenAI Agents SDK
+from aegis.adapters.openai_agents import aegis_input_guardrail
+agent = Agent(name="pentester", input_guardrails=[aegis_input_guardrail])
+```
+
+### TypeScript SDK (`sdks/typescript/`)
+
+```bash
+cd sdks/typescript && npm install && npm run build
+```
 
 ```typescript
-const AEGIS_URL = "http://127.0.0.1:19002";
+import { AegisClient } from '@aegis/sdk';
 
-async function checkShell(command: string): Promise<boolean> {
-  const res = await fetch(`${AEGIS_URL}/api/evaluate/shell`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ command, tool_name: "Bash" }),
-  });
-  const { decision } = await res.json();
-  return decision === "allow";
-}
+const client = new AegisClient();
 
-async function checkHttp(method: string, url: string): Promise<boolean> {
-  const res = await fetch(`${AEGIS_URL}/api/evaluate/http`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ method, url }),
-  });
-  const { decision } = await res.json();
-  return decision === "allow";
-}
+// Direct evaluation
+const verdict = await client.evaluateShell('rm -rf /tmp/data');
+// verdict.decision === 'deny'
 
-// MCP server tool guard example
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "shell") {
-    const allowed = await checkShell(request.params.arguments.command);
-    if (!allowed) return { content: [{ type: "text", text: "Blocked by Aegis" }] };
-  }
-  // ... execute tool
-});
+// HTTP evaluation
+const httpVerdict = await client.evaluateHttp('DELETE', 'https://target.com/api/users/1');
+// httpVerdict.decision === 'deny'
+
+// Snapshot lifecycle
+const snapshot = await client.createSnapshot();
+const diff = await client.snapshotDiff(snapshot.id);
+await client.snapshotRollback(snapshot.id);
+```
+
+**Framework adapters:**
+
+```typescript
+// Vercel AI SDK
+import { createAegisToolGuard } from '@aegis/sdk/adapters/vercel-ai';
+const guard = createAegisToolGuard(client);
+const verdict = await guard.checkToolCall('shell', { command: 'nmap -sV target.com' });
+
+// MCP server guard
+import { createMcpGuard } from '@aegis/sdk/adapters/mcp';
+const mcpGuard = createMcpGuard(client, { denyList: ['dangerous_tool'] });
+const verdict = await mcpGuard.checkToolCall({ name: 'run_command', arguments: { command: '...' } });
 ```
 
 ---
@@ -1242,6 +1308,35 @@ Detects:
 - **Hex decode**: `xxd -r -p | bash`
 - **Python exec**: `python -c "exec(base64.b64decode('...'))"`
 
+### Proxy Bypass Detection
+
+The shell analyzer detects attempts to bypass the Aegis proxy:
+
+| Bypass Attempt | Detected |
+|---------------|----------|
+| `curl --noproxy '*' https://target.com` | `--noproxy` flag |
+| `curl --no-proxy '*' https://target.com` | `--no-proxy` flag |
+| `unset HTTP_PROXY && curl https://target.com` | `unset` proxy env |
+| `HTTP_PROXY='' curl https://target.com` | Empty proxy assignment |
+| `export HTTP_PROXY=; curl https://target.com` | Semicolon-terminated clear |
+| `NO_PROXY=* curl http://target.com` | `NO_PROXY` wildcard |
+| `no_proxy=127.0.0.1 curl http://127.0.0.1:8888` | `no_proxy` for target |
+| `env -u http_proxy curl https://target.com` | `env -u` proxy strip |
+| `env --unset=HTTP_PROXY curl https://target.com` | `env --unset` proxy strip |
+
+### IP Obfuscation Normalization
+
+The scope checker normalizes obfuscated IP representations before checking:
+
+| Obfuscation | Input | Normalized |
+|-------------|-------|------------|
+| Decimal integer | `2130706433` | `127.0.0.1` |
+| Hex integer | `0x7f000001` | `127.0.0.1` |
+| Octal octets | `0177.0.0.01` | `127.0.0.1` |
+| Standard | `127.0.0.1` | `127.0.0.1` (no change) |
+
+This prevents bypass via `curl http://2130706433:8888/api/users` — the proxy normalizes the IP before scope checking.
+
 ---
 
 ## Architecture
@@ -1254,7 +1349,7 @@ aegis-proxy    HTTP/HTTPS MITM forward proxy (hyper + rcgen + tokio-rustls)
 aegis-guard    Shell command hook server (axum)
 aegis-web      Web UI API server (REST + WebSocket + SDK evaluate endpoints)
 aegis-tui      Terminal dashboard (ratatui + crossterm)
-aegis-sandbox  Kernel sandbox backends (macOS Seatbelt, Linux Landlock, fallback)
+aegis-sandbox  Kernel sandbox backends (Seatbelt, Landlock) + filesystem snapshots
 aegis-cli      CLI binary and command dispatch (clap)
 ```
 
@@ -1336,7 +1431,8 @@ aegis/
 │       ├── aggressive.yaml
 │       ├── ctf.yaml
 │       ├── sandbox-standard.yaml       # Sandbox: full access, denies ~/.ssh
-│       └── sandbox-strict.yaml         # Sandbox: read-only, network locked
+│       ├── sandbox-strict.yaml         # Sandbox: read-only, network locked
+│       └── sandbox-lockdown.yaml       # Sandbox: all network denied except Aegis
 ├── web/                                # Dashboard SPA (vanilla JS)
 │   ├── index.html
 │   ├── style.css
@@ -1380,11 +1476,14 @@ aegis/
 │   │   └── src/
 │   │       ├── config.rs               # SandboxPolicy, FilesystemPolicy
 │   │       ├── error.rs                # SandboxError
-│   │       └── platform/
-│   │           ├── mod.rs              # SandboxBackend trait + detect_backend
-│   │           ├── macos.rs            # Seatbelt (sandbox-exec) backend
-│   │           ├── linux.rs            # Landlock backend (kernel 5.13+)
-│   │           └── fallback.rs         # No-op with warning
+│   │       ├── platform/
+│   │       │   ├── mod.rs              # SandboxBackend trait + detect_backend
+│   │       │   ├── macos.rs            # Seatbelt (sandbox-exec) backend
+│   │       │   ├── linux.rs            # Landlock backend (kernel 5.13+)
+│   │       │   └── fallback.rs         # No-op with warning
+│   │       └── snapshot/
+│   │           ├── mod.rs              # SnapshotBackend trait + SnapshotManager
+│   │           └── git.rs              # Git-based snapshot backend
 │   ├── aegis-web/                      # Web API server
 │   │   └── src/
 │   │       ├── server.rs               # axum server setup
@@ -1396,6 +1495,30 @@ aegis/
 │           ├── app.rs                  # App state + event handling
 │           ├── ui.rs                   # Rendering (ratatui widgets)
 │           └── theme.rs                # ANSI 256 color palette
+├── sdks/
+│   ├── python/                         # Python SDK (aegis-sdk)
+│   │   ├── pyproject.toml
+│   │   ├── aegis/
+│   │   │   ├── client.py               # AegisClient (httpx-based)
+│   │   │   ├── decorators.py           # @guarded_tool decorator
+│   │   │   ├── types.py                # Verdict, SnapshotInfo, FileDiff
+│   │   │   ├── exceptions.py           # AegisBlocked, AegisConnectionError
+│   │   │   └── adapters/
+│   │   │       ├── langchain.py        # AegisCallbackHandler
+│   │   │       └── openai_agents.py    # @aegis_input_guardrail
+│   │   └── tests/
+│   └── typescript/                     # TypeScript SDK (@aegis/sdk)
+│       ├── package.json
+│       ├── tsconfig.json
+│       ├── src/
+│       │   ├── client.ts               # AegisClient (fetch-based)
+│       │   ├── types.ts                # Verdict, SnapshotInfo, FileDiff
+│       │   ├── errors.ts               # AegisBlocked, AegisConnectionError
+│       │   ├── middleware.ts            # guardedTool(), createGuard()
+│       │   └── adapters/
+│       │       ├── vercel-ai.ts        # Vercel AI SDK tool guard
+│       │       └── mcp.ts              # MCP server tool guard
+│       └── tests/
 └── scripts/                            # Example middleware scripts
 ```
 
@@ -1409,7 +1532,8 @@ aegis/
 - Multiple YAML policy files are merged alphabetically. Later files override earlier ones for overlapping keys.
 - Audit logs are backward-compatible: older entries without `headers`/`body` fields are parsed correctly.
 - **Secrets files** should be stored outside the project directory to avoid accidental commits. Never commit API keys.
-- **Sandbox isolation** depends on OS support: macOS Seatbelt (sandbox-exec) or Linux Landlock (kernel 5.13+). On unsupported platforms, a warning is logged and the agent runs without isolation.
+- **Sandbox isolation** depends on OS support: macOS Seatbelt (sandbox-exec) or Linux Landlock (kernel 5.13+). On unsupported platforms, a warning is logged and the agent runs without isolation. No root/sudo required on either platform.
+- The `sandbox-lockdown` preset is designed for testing sandbox network isolation — it denies all network except Aegis service ports. For normal pentesting, use `sandbox-standard` (open network, proxy enforces policy).
 
 ---
 

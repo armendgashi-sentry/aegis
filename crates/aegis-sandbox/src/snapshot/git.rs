@@ -205,8 +205,13 @@ impl SnapshotBackend for GitBackend {
 
         let (original_branch, _snapshot_branch) = parse_branches(snapshot)?;
 
-        // Discard all agent changes: restore working tree to snapshot commit
-        Self::git(root, &["checkout", "."])?;
+        // Discard ALL agent changes: reset index + working tree to the snapshot commit.
+        // `git reset --hard HEAD` handles every damage type:
+        //   - staged deletions (git rm)
+        //   - unstaged deletions (rm -rf)
+        //   - file modifications
+        // `git clean -fd` removes untracked files the agent created.
+        Self::git(root, &["reset", "--hard", "HEAD"])?;
         Self::git(root, &["clean", "-fd"])?;
 
         // Switch back to original branch
@@ -345,6 +350,52 @@ mod tests {
         assert!(!root.join("agent_file.txt").exists());
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
         assert_eq!(readme, "# Test\n");
+    }
+
+    #[test]
+    fn test_rollback_restores_deleted_files_and_dirs() {
+        let dir = setup_git_repo();
+        let root = dir.path();
+        let backend = GitBackend;
+
+        // Add more files to the initial state
+        fs::create_dir_all(root.join("src/config")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("src/config/settings.yaml"), "key: value").unwrap();
+        fs::write(root.join("important.txt"), "do not delete").unwrap();
+        Command::new("git").args(["add", "-A"]).current_dir(root).output().unwrap();
+        Command::new("git").args(["commit", "-m", "add project files"]).current_dir(root).output().unwrap();
+
+        let snap = backend.create(root).unwrap();
+
+        // Simulate all types of agent damage:
+        fs::remove_file(root.join("important.txt")).unwrap();       // rm file
+        fs::remove_dir_all(root.join("src")).unwrap();              // rm -rf directory
+        fs::write(root.join("README.md"), "CORRUPTED").unwrap();    // modify file
+        fs::write(root.join("junk.txt"), "agent output").unwrap();  // create new file
+        // Staged deletion via git rm
+        Command::new("git")
+            .args(["rm", "-f", "README.md"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+
+        let diff = backend.diff(&snap).unwrap();
+        assert!(!diff.deleted.is_empty(), "diff should show deleted files");
+        assert!(!diff.added.is_empty(), "diff should show new files");
+
+        // Rollback
+        backend.rollback(&snap).unwrap();
+
+        // Verify EVERYTHING is restored
+        assert!(root.join("important.txt").exists(), "deleted file not restored");
+        assert_eq!(fs::read_to_string(root.join("important.txt")).unwrap(), "do not delete");
+        assert!(root.join("src/main.rs").exists(), "deleted dir/file not restored");
+        assert_eq!(fs::read_to_string(root.join("src/main.rs")).unwrap(), "fn main() {}");
+        assert!(root.join("src/config/settings.yaml").exists(), "nested deleted file not restored");
+        assert!(root.join("README.md").exists(), "git-rm'd file not restored");
+        assert_eq!(fs::read_to_string(root.join("README.md")).unwrap(), "# Test\n");
+        assert!(!root.join("junk.txt").exists(), "agent junk file not cleaned up");
     }
 
     #[test]
