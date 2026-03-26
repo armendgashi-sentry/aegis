@@ -1,0 +1,7 @@
+scope:
+  targets:
+    - "127.0.0.1"
+    - "localhost"
+  ports:
+    - 8888
+  exclusions: []

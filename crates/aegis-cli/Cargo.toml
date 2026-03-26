@@ -1,0 +1,27 @@
+[package]
+name = "aegis-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aegis"
+path = "src/main.rs"
+
+[dependencies]
+aegis-core = { workspace = true }
+aegis-proxy = { workspace = true }
+aegis-guard = { workspace = true }
+aegis-web = { workspace = true }
+aegis-tui = { workspace = true }
+aegis-sandbox = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+bytes = { workspace = true }
+atty = "0.2"

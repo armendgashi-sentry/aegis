@@ -1,0 +1,51 @@
+http:
+  methods:
+    safe: [GET, HEAD, OPTIONS]
+    inspect: [POST]
+    block: [DELETE, PUT, PATCH, TRACE]
+
+  payload:
+    block_sql:
+      - DROP
+      - DELETE
+      - TRUNCATE
+      - "ALTER TABLE"
+      - UPDATE
+      - INSERT
+    allow_sql:
+      - SELECT
+      - SHOW
+      - DESCRIBE
+    block_commands:
+      - "rm -rf"
+      - "rm -r"
+      - "dd if="
+      - mkfs
+      - shutdown
+      - reboot
+      - "chmod 777"
+      - "chown root"
+
+  max_request_body: 1048576  # 1MB
+
+shell:
+  block_patterns:
+    - "rm -rf"
+    - "rm -r"
+    - rmdir
+    - "dd if="
+    - mkfs
+    - shred
+    - "> /dev/"
+    - shutdown
+    - reboot
+    - "chmod 777"
+    - "chown root"
+    - "wget -O -"
+    - "curl -o /tmp"
+  block_sql_in_cli: true
+
+rate_limit:
+  requests_per_second: 5
+  burst: 20
+  per_target: true

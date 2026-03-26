@@ -1,0 +1,23 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/aegis run`
+[2m2026-03-25T00:07:31.546789Z[0m [32m INFO[0m Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+[2m2026-03-25T00:07:31.549046Z[0m [32m INFO[0m CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+
+  ╔═══════════════════════════════════════════╗
+  ║             AEGIS IS RUNNING              ║
+  ╠═══════════════════════════════════════════╣
+  ║  Proxy:   http://127.0.0.1:19000 (MITM) ║
+  ║  Guard:   http://127.0.0.1:19001        ║
+  ║  Web UI:  http://127.0.0.1:19002        ║
+  ╠═══════════════════════════════════════════╣
+  ║  CA cert: /Users/armend/.config/aegis/ca.pem  ║
+  ║  Press Ctrl+C to stop                     ║
+  ╚═══════════════════════════════════════════╝
+
+[2m2026-03-25T00:07:31.749751Z[0m [32m INFO[0m Aegis proxy listening on 127.0.0.1:19000 (MITM enabled)
+[2m2026-03-25T00:07:31.750330Z[0m [32m INFO[0m Aegis guard listening on 127.0.0.1:19001
+[2m2026-03-25T00:07:31.750355Z[0m [32m INFO[0m Serving web UI from ./web
+[2m2026-03-25T00:07:31.750390Z[0m [32m INFO[0m Aegis web UI listening on http://127.0.0.1:19002
+[2m2026-03-25T00:07:33.033981Z[0m [32m INFO[0m Guard hook received 114 bytes
+[2m2026-03-25T00:07:33.034393Z[0m [32m INFO[0m Guard hook payload: tool=Bash, event=PreToolUse
+[2m2026-03-25T00:07:33.035118Z[0m [32m INFO[0m Guard hook response: decision=Allow, reason=policy passed

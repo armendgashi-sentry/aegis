@@ -1,0 +1,23 @@
+sandbox:
+  enabled: true
+  filesystem:
+    read_only: ["."]
+    read_write: ["./output", "./reports", "./loot"]
+    deny:
+      - "~/.ssh"
+      - "~/.aws"
+      - "~/.gnupg"
+      - "~/.config"
+      - "~/.local"
+      - "~/.kube"
+      - "~/.docker"
+    allow_tmp: true
+  network:
+    # Only allow connections through Aegis proxy + standard ports
+    # Proxy/guard addresses are auto-added at runtime
+    allow_connect:
+      - "*:80"
+      - "*:443"
+    deny_all: true
+  process:
+    allow_exec: true

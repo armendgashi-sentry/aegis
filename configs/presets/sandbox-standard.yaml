@@ -1,0 +1,17 @@
+sandbox:
+  enabled: true
+  filesystem:
+    read_only: ["."]
+    read_write: ["."]
+    deny:
+      - "~/.ssh"
+      - "~/.aws"
+      - "~/.gnupg"
+      - "~/.config/aegis/secrets.yaml"
+    allow_tmp: true
+  network:
+    # Allow all network — the proxy handles policy enforcement
+    allow_connect: []
+    deny_all: false
+  process:
+    allow_exec: true

@@ -1,0 +1,6 @@
+name: block-admin-endpoints
+description: Block all requests to admin paths (example - remove for your engagement)
+trigger:
+  path_matches: "/admin/*"
+action: block
+reason: "Admin endpoints are excluded from scope"

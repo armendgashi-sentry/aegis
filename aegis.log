@@ -1,0 +1,166 @@
+2026-03-25T00:08:32.454892Z  INFO Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+2026-03-25T00:08:32.459208Z  INFO CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+2026-03-25T00:08:32.660339Z  INFO Aegis proxy listening on 127.0.0.1:19000 (MITM enabled)
+2026-03-25T00:08:32.661409Z  INFO Aegis guard listening on 127.0.0.1:19001
+2026-03-25T00:08:32.661638Z  INFO Serving web UI from ./web
+2026-03-25T00:08:32.661658Z  INFO Aegis web UI listening on http://127.0.0.1:19002
+2026-03-25T00:08:33.162910Z  INFO Claude Code hooks -> .claude/settings.local.json
+2026-03-25T00:08:33.162986Z  INFO Spawning agent: claude ["--dangerously-skip-permissions"]
+2026-03-25T00:08:34.046424Z  WARN [BLOCKED] CONNECT storage.googleapis.com:443 -> Target storage.googleapis.com:443 is out of scope (builtin:scope)
+2026-03-25T00:08:35.044893Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:08:42.871203Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:08:48.368779Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:08:50.893331Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:08:54.227535Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:08:57.956452Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:09:05.719324Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:09:07.350347Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:09:22.355867Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:10:08.041836Z  INFO Agent exited with status: exit status: 0
+2026-03-25T00:10:08.042289Z  INFO Agent exited. Shutting down Aegis.
+2026-03-25T00:10:34.683604Z  INFO Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+2026-03-25T00:10:34.684763Z  INFO CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+2026-03-25T00:10:34.884967Z  INFO Aegis proxy listening on 127.0.0.1:19000 (MITM enabled)
+2026-03-25T00:10:34.885099Z  INFO Aegis guard listening on 127.0.0.1:19001
+2026-03-25T00:10:34.885113Z  INFO Serving web UI from ./web
+2026-03-25T00:10:34.885136Z  INFO Aegis web UI listening on http://127.0.0.1:19002
+2026-03-25T00:10:35.386840Z  INFO Initializing git repo (required for Claude Code project settings)
+2026-03-25T00:10:35.424414Z  INFO Claude Code hooks -> .claude/settings.local.json
+2026-03-25T00:10:35.424432Z  INFO Spawning agent: claude ["--dangerously-skip-permissions"]
+2026-03-25T00:10:36.196120Z  WARN [BLOCKED] CONNECT storage.googleapis.com:443 -> Target storage.googleapis.com:443 is out of scope (builtin:scope)
+2026-03-25T00:10:37.116900Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:10:42.597728Z  INFO Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+2026-03-25T00:10:42.597889Z  INFO CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+2026-03-25T00:10:42.797979Z ERROR Proxy error: Address already in use (os error 48)
+2026-03-25T00:10:42.798005Z ERROR Guard error: Address already in use (os error 48)
+2026-03-25T00:10:42.798008Z  INFO Serving web UI from ./web
+2026-03-25T00:10:42.798067Z ERROR Web API error: Address already in use (os error 48)
+2026-03-25T00:10:43.300742Z  INFO Claude Code hooks -> .claude/settings.local.json
+2026-03-25T00:10:43.300806Z  INFO Spawning agent: claude ["--dangerously-skip-permissions"]
+2026-03-25T00:10:43.967324Z  WARN [BLOCKED] CONNECT storage.googleapis.com:443 -> Target storage.googleapis.com:443 is out of scope (builtin:scope)
+2026-03-25T00:10:44.901884Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:10:48.517271Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:10:48.911792Z  INFO Agent exited with status: exit status: 0
+2026-03-25T00:10:48.911995Z  INFO Agent exited. Shutting down Aegis.
+2026-03-25T00:10:50.611351Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:11:00.314785Z  INFO Agent exited with status: exit status: 0
+2026-03-25T00:11:00.314858Z  INFO Agent exited. Shutting down Aegis.
+2026-03-25T00:11:07.554298Z  INFO Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+2026-03-25T00:11:07.555100Z  INFO CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+2026-03-25T00:11:07.755228Z  INFO Aegis proxy listening on 127.0.0.1:19000 (MITM enabled)
+2026-03-25T00:11:07.755260Z  INFO Serving web UI from ./web
+2026-03-25T00:11:07.755258Z  INFO Aegis guard listening on 127.0.0.1:19001
+2026-03-25T00:11:07.755289Z  INFO Aegis web UI listening on http://127.0.0.1:19002
+2026-03-25T00:11:08.257631Z  INFO Claude Code hooks -> .claude/settings.local.json
+2026-03-25T00:11:08.257669Z  INFO Spawning agent: claude ["--dangerously-skip-permissions"]
+2026-03-25T00:11:08.911474Z  WARN [BLOCKED] CONNECT storage.googleapis.com:443 -> Target storage.googleapis.com:443 is out of scope (builtin:scope)
+2026-03-25T00:11:16.479941Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:11:16.525127Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:11:23.448658Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:11:28.386157Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:11:32.084126Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:11:35.350823Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:11:38.822114Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:11:39.350869Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:11:58.246243Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:12:07.955148Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:12:08.493601Z  INFO Agent exited with status: exit status: 0
+2026-03-25T00:12:08.493850Z  INFO Agent exited. Shutting down Aegis.
+2026-03-25T00:14:39.484335Z  INFO Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+2026-03-25T00:14:39.488293Z  INFO CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+2026-03-25T00:14:39.689635Z  INFO Aegis proxy listening on 127.0.0.1:19000 (MITM enabled)
+2026-03-25T00:14:39.690752Z  INFO Aegis guard listening on 127.0.0.1:19001
+2026-03-25T00:14:39.690827Z  INFO Serving web UI from ./web
+2026-03-25T00:14:39.690849Z  INFO Aegis web UI listening on http://127.0.0.1:19002
+2026-03-25T00:14:40.193077Z  INFO Claude Code hooks -> .claude/settings.local.json
+2026-03-25T00:14:40.193175Z  INFO Spawning agent: claude ["--dangerously-skip-permissions"]
+2026-03-25T00:14:41.215871Z  WARN [BLOCKED] CONNECT storage.googleapis.com:443 -> Target storage.googleapis.com:443 is out of scope (builtin:scope)
+2026-03-25T00:14:47.803964Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:14:47.849996Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:14:55.396839Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:15:03.118885Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:15:05.762157Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:15:09.017155Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:15:12.932672Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:15:15.436563Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:15:25.133058Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:15:25.369431Z  INFO Agent exited with status: exit status: 0
+2026-03-25T00:15:25.369651Z  INFO Agent exited. Shutting down Aegis.
+2026-03-25T00:16:18.972339Z  INFO Loaded middleware: block-admin-endpoints (./policies/middlewares/example-block-admin.yaml)
+2026-03-25T00:16:18.973670Z  INFO CA certificate loaded from /Users/armend/.config/aegis/ca.pem
+2026-03-25T00:16:19.173942Z  INFO Aegis proxy listening on 127.0.0.1:19000 (MITM enabled)
+2026-03-25T00:16:19.174132Z  INFO Aegis guard listening on 127.0.0.1:19001
+2026-03-25T00:16:19.174190Z  INFO Serving web UI from ./web
+2026-03-25T00:16:19.174207Z  INFO Aegis web UI listening on http://127.0.0.1:19002
+2026-03-25T00:16:19.675613Z  INFO Claude Code hooks -> .claude/settings.local.json
+2026-03-25T00:16:19.675743Z  INFO Spawning agent: claude ["--dangerously-skip-permissions"]
+2026-03-25T00:16:20.314859Z  WARN [BLOCKED] CONNECT storage.googleapis.com:443 -> Target storage.googleapis.com:443 is out of scope (builtin:scope)
+2026-03-25T00:16:21.306048Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:16:27.682895Z  WARN [BLOCKED] CONNECT github.com:443 -> Target github.com:443 is out of scope (builtin:scope)
+2026-03-25T00:16:32.680377Z  INFO Guard hook received 490 bytes
+2026-03-25T00:16:32.680409Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:16:32.680546Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:16:34.878339Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:16:38.535971Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:16:42.087674Z  INFO Guard hook received 521 bytes
+2026-03-25T00:16:42.087771Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:16:42.087969Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:16:42.107296Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:16:46.021571Z  INFO Guard hook received 538 bytes
+2026-03-25T00:16:46.021606Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:16:46.021765Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:16:46.038923Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:16:50.291930Z  INFO Guard hook received 546 bytes
+2026-03-25T00:16:50.291995Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:16:50.292142Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:16:50.313305Z  WARN [BLOCKED] CONNECT internetdb.shodan.io:443 -> Target internetdb.shodan.io:443 is out of scope (builtin:scope)
+2026-03-25T00:16:53.380825Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:16:57.057665Z  INFO Guard hook received 552 bytes
+2026-03-25T00:16:57.057737Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:16:57.057955Z  WARN [GUARD BLOCKED] curl -s --noproxy '*' --max-time 10 "https://internetdb.shodan.io/172.217.16.142" -> Proxy bypass attempt: --noproxy flag (builtin:shell)
+2026-03-25T00:16:57.057967Z  INFO Guard hook response: decision=Deny, reason=Proxy bypass attempt: --noproxy flag
+2026-03-25T00:17:12.061362Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:17:32.069080Z  INFO Guard hook received 614 bytes
+2026-03-25T00:17:32.069277Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:17:32.069634Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:17:32.574133Z  INFO Guard hook received 568 bytes
+2026-03-25T00:17:32.574178Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:17:32.574337Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:17:45.411681Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:18:00.924333Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:18:04.058084Z  INFO Guard hook received 595 bytes
+2026-03-25T00:18:04.058114Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:18:04.058245Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:18:09.765467Z  INFO Guard hook received 651 bytes
+2026-03-25T00:18:09.765536Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:18:09.765858Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:18:12.517519Z  INFO Guard hook received 600 bytes
+2026-03-25T00:18:12.517556Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:18:12.517687Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:18:16.829916Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:18:19.179438Z  INFO Guard hook received 615 bytes
+2026-03-25T00:18:19.179497Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:18:19.179712Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:18:19.346594Z  INFO Guard hook received 587 bytes
+2026-03-25T00:18:19.346633Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:18:19.346772Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:18:34.210808Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:19:04.971147Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:19:42.826772Z  INFO Guard hook received 469 bytes
+2026-03-25T00:19:42.827072Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:19:42.827371Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:19:57.807912Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:19:59.679828Z  INFO Guard hook received 452 bytes
+2026-03-25T00:19:59.679863Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:19:59.679986Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:20:14.665999Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:20:43.859205Z  INFO Guard hook received 452 bytes
+2026-03-25T00:20:43.859409Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:20:43.859639Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:20:58.844802Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:21:09.865917Z  INFO Guard hook received 452 bytes
+2026-03-25T00:21:09.866192Z  INFO Guard hook payload: tool=Bash, event=PreToolUse
+2026-03-25T00:21:09.866454Z  INFO Guard hook response: decision=Allow, reason=policy passed
+2026-03-25T00:21:24.864539Z  WARN [BLOCKED] CONNECT http-intake.logs.us5.datadoghq.com:443 -> Target http-intake.logs.us5.datadoghq.com:443 is out of scope (builtin:scope)
+2026-03-25T00:26:10.197950Z  INFO Agent exited with status: exit status: 0
+2026-03-25T00:26:10.198250Z  INFO Agent exited. Shutting down Aegis.

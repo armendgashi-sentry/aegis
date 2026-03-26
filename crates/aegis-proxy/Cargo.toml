@@ -1,0 +1,27 @@
+[package]
+name = "aegis-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aegis-core = { workspace = true }
+tokio = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+tower = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tracing = { workspace = true }
+governor = { workspace = true }
+bytes = { workspace = true }
+url = { workspace = true }
+dashmap = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+pem = "3"
+time = "0.3"

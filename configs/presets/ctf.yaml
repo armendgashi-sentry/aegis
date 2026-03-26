@@ -1,0 +1,34 @@
+http:
+  methods:
+    safe: [GET, HEAD, OPTIONS, TRACE]
+    inspect: [POST, PUT, PATCH, DELETE]
+    block: []
+
+  payload:
+    block_sql:
+      - DROP
+      - TRUNCATE
+    allow_sql:
+      - SELECT
+      - UNION
+      - SHOW
+      - DESCRIBE
+      - DELETE
+      - UPDATE
+      - INSERT
+    block_commands: []
+
+  max_request_body: 104857600  # 100MB
+
+shell:
+  block_patterns:
+    - "rm -rf /"
+    - "dd if=/dev/zero of=/dev"
+    - shutdown
+    - reboot
+  block_sql_in_cli: false
+
+rate_limit:
+  requests_per_second: 100
+  burst: 500
+  per_target: true

@@ -1,0 +1,91 @@
+[workspace]
+members = [
+    "crates/aegis-core",
+    "crates/aegis-proxy",
+    "crates/aegis-guard",
+    "crates/aegis-web",
+    "crates/aegis-tui",
+    "crates/aegis-sandbox",
+    "crates/aegis-cli",
+]
+default-members = ["crates/aegis-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/armend/aegis"
+
+[workspace.dependencies]
+# Internal crates
+aegis-core = { path = "crates/aegis-core" }
+aegis-proxy = { path = "crates/aegis-proxy" }
+aegis-guard = { path = "crates/aegis-guard" }
+aegis-web = { path = "crates/aegis-web" }
+aegis-tui = { path = "crates/aegis-tui" }
+aegis-sandbox = { path = "crates/aegis-sandbox" }
+
+# Async
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "fs", "macros", "signal", "process", "io-util"] }
+
+# HTTP server (guard + web API)
+axum = { version = "0.8", features = ["ws"] }
+
+# HTTP proxy
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http = "1"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+# TLS / MITM
+rcgen = "0.13"
+rustls = "0.23"
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Pattern matching
+regex = "1"
+glob = "0.3"
+
+# Network
+ipnet = "2"
+url = "2"
+
+# SQL parsing
+sqlparser = { version = "0.53", features = ["visitor"] }
+
+# Rate limiting
+governor = "0.8"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Misc
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+dirs = "6"
+shellwords = "1"
+base64 = "0.22"
+dashmap = "6"
+bytes = "1"
+tokio-tungstenite = "0.26"
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
+percent-encoding = "2"
+ratatui = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }

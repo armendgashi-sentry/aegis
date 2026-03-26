@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS // Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="scanlines"></div>
+
+  <header>
+    <div class="logo">
+      <span class="logo-bracket">[</span>
+      <span class="logo-text">AEGIS</span>
+      <span class="logo-bracket">]</span>
+    </div>
+    <div class="status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">CONNECTING...</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">TOTAL</div>
+        <div class="stat-value" id="stat-total">0</div>
+      </div>
+      <div class="stat-card stat-allow">
+        <div class="stat-label">ALLOWED</div>
+        <div class="stat-value" id="stat-allowed">0</div>
+      </div>
+      <div class="stat-card stat-deny">
+        <div class="stat-label">BLOCKED</div>
+        <div class="stat-value" id="stat-denied">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">REQ/S</div>
+        <div class="stat-value" id="stat-rps">0</div>
+      </div>
+    </section>
+
+    <section class="mode-tabs">
+      <button class="mode-btn active" data-mode="live">// LIVE FEED</button>
+      <button class="mode-btn" data-mode="logs">// LOGS</button>
+    </section>
+
+    <section class="events-section" id="live-section">
+      <div class="section-header">
+        <h2>// LIVE FEED</h2>
+        <div class="filters">
+          <button class="filter-btn active" data-filter="all">ALL</button>
+          <button class="filter-btn" data-filter="allow">ALLOW</button>
+          <button class="filter-btn" data-filter="deny">BLOCK</button>
+        </div>
+      </div>
+
+      <div class="events-table">
+        <div class="table-header">
+          <span class="col-time">TIME</span>
+          <span class="col-decision">STATUS</span>
+          <span class="col-method">METHOD</span>
+          <span class="col-url">TARGET</span>
+          <span class="col-source">SOURCE</span>
+          <span class="col-reason">REASON</span>
+        </div>
+        <div class="table-body" id="events-body">
+          <div class="empty-state">
+            <p>WAITING FOR EVENTS...</p>
+            <p class="blink">_</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="events-section" id="logs-section" style="display: none;">
+      <div class="section-header">
+        <h2>// AUDIT LOGS</h2>
+        <div class="filters">
+          <select id="log-file-select" class="log-select">
+            <option value="">SELECT LOG FILE...</option>
+          </select>
+          <button class="filter-btn" data-log-filter="all" id="log-filter-all">ALL</button>
+          <button class="filter-btn" data-log-filter="allow" id="log-filter-allow">ALLOW</button>
+          <button class="filter-btn" data-log-filter="deny" id="log-filter-deny">BLOCK</button>
+        </div>
+      </div>
+
+      <div class="log-stats" id="log-stats" style="display: none;">
+        <span class="log-stat">TOTAL: <b id="log-stat-total">0</b></span>
+        <span class="log-stat log-stat-allow">ALLOWED: <b id="log-stat-allowed">0</b></span>
+        <span class="log-stat log-stat-deny">BLOCKED: <b id="log-stat-denied">0</b></span>
+      </div>
+
+      <div class="events-table">
+        <div class="table-header">
+          <span class="col-time">TIME</span>
+          <span class="col-decision">STATUS</span>
+          <span class="col-method">METHOD</span>
+          <span class="col-url">TARGET</span>
+          <span class="col-source">SOURCE</span>
+          <span class="col-reason">REASON</span>
+        </div>
+        <div class="table-body" id="log-events-body">
+          <div class="empty-state">
+            <p>SELECT A LOG FILE...</p>
+            <p class="blink">_</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>AEGIS v0.1.0</span>
+    <span id="event-count">0 events</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
