@@ -248,6 +248,38 @@ function toggleDetail(entry, row) {
       </div>`;
   }
 
+  // Build response section
+  let responseHtml = '';
+  if (entry.response_status) {
+    const statusCode = entry.response_status;
+    const statusClass = statusCode < 300 ? 'status-2xx' : statusCode < 400 ? 'status-3xx' : statusCode < 500 ? 'status-4xx' : 'status-5xx';
+
+    let respHeadersHtml = '';
+    if (entry.response_headers && Object.keys(entry.response_headers).length > 0) {
+      const sortedKeys = Object.keys(entry.response_headers).sort();
+      respHeadersHtml = '<div class="request-headers">';
+      for (const key of sortedKeys) {
+        respHeadersHtml += `<div class="request-header-line"><span class="header-key">${escapeHtml(key)}:</span> <span class="header-val">${escapeHtml(entry.response_headers[key])}</span></div>`;
+      }
+      respHeadersHtml += '</div>';
+    }
+
+    let respBodyHtml = '';
+    if (entry.response_body) {
+      respBodyHtml = `<div class="request-body-section"><div class="request-body-label">Body</div><pre class="request-body">${escapeHtml(entry.response_body)}</pre></div>`;
+    }
+
+    responseHtml = `
+      <div class="response-display">
+        <div class="response-status-line">
+          <span class="response-label">RESPONSE</span>
+          <span class="response-status ${statusClass}">${statusCode}</span>
+        </div>
+        ${respHeadersHtml}
+        ${respBodyHtml}
+      </div>`;
+  }
+
   const panel = document.createElement('div');
   panel.className = `detail-panel ${decisionClass}`;
   panel.innerHTML = `
@@ -257,6 +289,7 @@ function toggleDetail(entry, row) {
     </div>
     <div class="request-display">${requestHtml}</div>
     ${secretsHtml}
+    ${responseHtml}
     ${entry.reason ? `<div class="detail-reason ${reasonClass}">${escapeHtml(entry.reason)}</div>` : ''}
     <div class="detail-grid detail-meta">
       <span class="detail-label">Source</span>

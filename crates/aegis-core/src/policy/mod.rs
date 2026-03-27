@@ -12,7 +12,7 @@ use crate::errors::AegisResult;
 use crate::scope::TargetScope;
 
 use self::middleware::MiddlewareEngine;
-use self::yaml_policy::YamlPolicy;
+use self::yaml_policy::{RateLimitPolicy, YamlPolicy};
 
 /// The policy engine runs all analyzers and middlewares, producing a final verdict.
 /// Uses deny-first: any Deny from any source = request blocked.
@@ -22,6 +22,7 @@ pub struct PolicyEngine {
     shell_analyzers: Vec<Box<dyn ShellAnalyzer>>,
     middleware_engine: MiddlewareEngine,
     audit: AuditLogger,
+    rate_limit: RateLimitPolicy,
 }
 
 impl PolicyEngine {
@@ -49,26 +50,26 @@ impl PolicyEngine {
             shell_analyzers,
             middleware_engine,
             audit,
+            rate_limit: policy.rate_limit,
         })
     }
 
     /// Evaluate an HTTP request through the full pipeline.
+    /// Returns the verdict without logging — the caller (proxy layer) logs
+    /// after capturing the HTTP response.
     pub async fn evaluate_http(&self, ctx: &RequestContext) -> Verdict {
         // 1. Scope check (always first)
         if !self.scope.is_in_scope(&ctx.host, ctx.port) {
-            let verdict = Verdict::deny(
+            return Verdict::deny(
                 format!("Target {}:{} is out of scope", ctx.host, ctx.port),
                 "builtin:scope",
             );
-            self.log_http(ctx, &verdict);
-            return verdict;
         }
 
         // 2. Built-in HTTP analyzers (method check, payload inspection, SQL detection)
         for analyzer in &self.http_analyzers {
             if let Some(verdict) = analyzer.analyze(ctx) {
                 if verdict.is_deny() {
-                    self.log_http(ctx, &verdict);
                     return verdict;
                 }
             }
@@ -77,13 +78,10 @@ impl PolicyEngine {
         // 3. Custom middlewares
         if let Some(verdict) = self.middleware_engine.evaluate(ctx).await {
             if verdict.is_deny() {
-                self.log_http(ctx, &verdict);
                 return verdict;
             }
         }
 
-        // All passed — Allow decisions are logged by the proxy handler
-        // (which enriches with secrets_applied metadata).
         Verdict::allow("policy:passed")
     }
 
@@ -129,19 +127,9 @@ impl PolicyEngine {
         &self.scope
     }
 
-    fn log_http(&self, ctx: &RequestContext, verdict: &Verdict) {
-        self.audit.log(&AuditEntry::with_request(
-            verdict.decision,
-            verdict.reason.clone(),
-            verdict.source.clone(),
-            ctx.method.clone(),
-            ctx.url.to_string(),
-            ctx.host.clone(),
-            Layer::Proxy,
-            ctx.headers.clone(),
-            ctx.body.as_deref(),
-            ctx.content_type.clone(),
-        ));
+    /// Get the rate limit policy from the loaded YAML config.
+    pub fn rate_limit(&self) -> &RateLimitPolicy {
+        &self.rate_limit
     }
 
     fn log_shell(&self, ctx: &ShellContext, verdict: &Verdict) {

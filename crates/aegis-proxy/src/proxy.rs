@@ -12,6 +12,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
+use aegis_core::audit::AuditEntry;
 use aegis_core::decision::Decision;
 
 use crate::handler::ProxyHandler;
@@ -129,7 +130,7 @@ async fn handle_plain_http(
         Err(_) => None,
     };
 
-    let verdict = handler.evaluate(&method, &uri, headers.clone(), body.clone()).await;
+    let (verdict, mut audit_entry) = handler.evaluate(&method, &uri, headers.clone(), body.clone()).await;
 
     match verdict.decision {
         Decision::Deny => {
@@ -137,7 +138,13 @@ async fn handle_plain_http(
                 "[BLOCKED] {} {} -> {} ({})",
                 method, uri, verdict.reason, verdict.source,
             );
-            blocked_response(&verdict.reason)
+            let response = blocked_response(&verdict.reason);
+            if let Some(ref mut entry) = audit_entry {
+                let meta = capture_response_meta(response.status(), response.headers(), &Bytes::new());
+                set_response_on_entry(entry, &meta);
+                handler.log_entry(entry);
+            }
+            response
         }
         Decision::Allow => {
             tracing::info!("[ALLOWED] {} {}", method, uri);
@@ -145,7 +152,12 @@ async fn handle_plain_http(
                 let host = parsed.host_str().unwrap_or("");
                 handler.inject_secrets(host, parsed.path(), &mut headers);
             }
-            forward_request(&method, &uri, headers, body).await
+            let (response, meta) = forward_request(&method, &uri, headers, body).await;
+            if let Some(ref mut entry) = audit_entry {
+                set_response_on_entry(entry, &meta);
+                handler.log_entry(entry);
+            }
+            response
         }
     }
 }
@@ -273,7 +285,7 @@ async fn handle_mitm(
                 Err(_) => None,
             };
 
-            let verdict = handler.evaluate(&method, &full_uri, headers.clone(), body.clone()).await;
+            let (verdict, mut audit_entry) = handler.evaluate(&method, &full_uri, headers.clone(), body.clone()).await;
 
             let response = match verdict.decision {
                 Decision::Deny => {
@@ -281,13 +293,24 @@ async fn handle_mitm(
                         "[BLOCKED] {} {} -> {} ({})",
                         method, full_uri, verdict.reason, verdict.source,
                     );
-                    blocked_response(&verdict.reason)
+                    let resp = blocked_response(&verdict.reason);
+                    if let Some(ref mut entry) = audit_entry {
+                        let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+                        set_response_on_entry(entry, &meta);
+                        handler.log_entry(entry);
+                    }
+                    resp
                 }
                 Decision::Allow => {
                     tracing::info!("[ALLOWED] {} {}", method, full_uri);
                     let url_path = path.split('?').next().unwrap_or(&path);
                     handler.inject_secrets(&host, url_path, &mut headers);
-                    forward_https_request(&method, &host, &host_port, &path, headers, body).await
+                    let (resp, meta) = forward_https_request(&method, &host, &host_port, &path, headers, body).await;
+                    if let Some(ref mut entry) = audit_entry {
+                        set_response_on_entry(entry, &meta);
+                        handler.log_entry(entry);
+                    }
+                    resp
                 }
             };
 
@@ -305,7 +328,7 @@ async fn handle_mitm(
     Ok(())
 }
 
-/// Forward an HTTPS request to the real target (connects with TLS).
+/// Forward an HTTPS request to the real target (connects with TLS). Returns response and metadata.
 async fn forward_https_request(
     method: &str,
     host: &str,
@@ -313,11 +336,15 @@ async fn forward_https_request(
     path: &str,
     headers: HashMap<String, String>,
     body: Option<Bytes>,
-) -> Response<Full<Bytes>> {
+) -> (Response<Full<Bytes>>, ResponseMeta) {
     // Connect to the real target
     let tcp = match tokio::net::TcpStream::connect(host_port).await {
         Ok(s) => s,
-        Err(e) => return error_response(502, &format!("Failed to connect to {host_port}: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("Failed to connect to {host_port}: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            return (resp, meta);
+        }
     };
 
     // Establish TLS to the target
@@ -330,12 +357,20 @@ async fn forward_https_request(
 
     let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
         Ok(sn) => sn,
-        Err(e) => return error_response(502, &format!("Invalid server name {host}: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("Invalid server name {host}: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            return (resp, meta);
+        }
     };
 
     let tls_stream = match connector.connect(server_name, tcp).await {
         Ok(s) => s,
-        Err(e) => return error_response(502, &format!("TLS connection to {host} failed: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("TLS connection to {host} failed: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            return (resp, meta);
+        }
     };
 
     let io = TokioIo::new(tls_stream);
@@ -343,7 +378,11 @@ async fn forward_https_request(
     // Send HTTP request through the TLS connection
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
         Ok(h) => h,
-        Err(e) => return error_response(502, &format!("HTTP handshake with {host} failed: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("HTTP handshake with {host} failed: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            return (resp, meta);
+        }
     };
 
     tokio::spawn(async move {
@@ -374,7 +413,11 @@ async fn forward_https_request(
     let outgoing_body = body.unwrap_or_default();
     let req = match builder.body(Full::new(outgoing_body)) {
         Ok(r) => r,
-        Err(e) => return error_response(502, &format!("Failed to build request: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("Failed to build request: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            return (resp, meta);
+        }
     };
 
     match sender.send_request(req).await {
@@ -385,30 +428,40 @@ async fn forward_https_request(
             match resp.into_body().collect().await {
                 Ok(collected) => {
                     let body_bytes = collected.to_bytes();
-                    let mut response = Response::builder().status(status);
+                    let meta = capture_response_meta(status, &resp_headers, &body_bytes);
 
+                    let mut response = Response::builder().status(status);
                     for (name, value) in &resp_headers {
                         response = response.header(name, value);
                     }
-
-                    response
+                    let response = response
                         .body(Full::new(body_bytes))
-                        .unwrap_or_else(|_| error_response(502, "Failed to build response"))
+                        .unwrap_or_else(|_| error_response(502, "Failed to build response"));
+
+                    (response, meta)
                 }
-                Err(e) => error_response(502, &format!("Failed to read response: {e}")),
+                Err(e) => {
+                    let resp = error_response(502, &format!("Failed to read response: {e}"));
+                    let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+                    (resp, meta)
+                }
             }
         }
-        Err(e) => error_response(502, &format!("Failed to send request to {host}: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("Failed to send request to {host}: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            (resp, meta)
+        }
     }
 }
 
-/// Forward a plain HTTP request to the target.
+/// Forward a plain HTTP request to the target. Returns response and metadata for audit.
 async fn forward_request(
     method: &str,
     uri: &str,
     headers: HashMap<String, String>,
     body: Option<Bytes>,
-) -> Response<Full<Bytes>> {
+) -> (Response<Full<Bytes>>, ResponseMeta) {
     let client: hyper_util::client::legacy::Client<
         hyper_util::client::legacy::connect::HttpConnector,
         Full<Bytes>,
@@ -430,31 +483,45 @@ async fn forward_request(
     let outgoing_body = body.unwrap_or_default();
     let req = match builder.body(Full::new(outgoing_body)) {
         Ok(r) => r,
-        Err(e) => return error_response(502, &format!("Failed to build request: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("Failed to build request: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            return (resp, meta);
+        }
     };
 
     match client.request(req).await {
         Ok(resp) => {
             let status = resp.status();
-            let headers = resp.headers().clone();
+            let resp_headers = resp.headers().clone();
 
             match resp.into_body().collect().await {
                 Ok(collected) => {
                     let body_bytes = collected.to_bytes();
-                    let mut response = Response::builder().status(status);
+                    let meta = capture_response_meta(status, &resp_headers, &body_bytes);
 
-                    for (name, value) in &headers {
+                    let mut response = Response::builder().status(status);
+                    for (name, value) in &resp_headers {
                         response = response.header(name, value);
                     }
-
-                    response
+                    let response = response
                         .body(Full::new(body_bytes))
-                        .unwrap_or_else(|_| error_response(502, "Failed to build response"))
+                        .unwrap_or_else(|_| error_response(502, "Failed to build response"));
+
+                    (response, meta)
                 }
-                Err(e) => error_response(502, &format!("Failed to read response body: {e}")),
+                Err(e) => {
+                    let resp = error_response(502, &format!("Failed to read response body: {e}"));
+                    let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+                    (resp, meta)
+                }
             }
         }
-        Err(e) => error_response(502, &format!("Failed to forward request: {e}")),
+        Err(e) => {
+            let resp = error_response(502, &format!("Failed to forward request: {e}"));
+            let meta = capture_response_meta(resp.status(), resp.headers(), &Bytes::new());
+            (resp, meta)
+        }
     }
 }
 
@@ -465,6 +532,46 @@ fn parse_host_port(authority: &str) -> (String, u16) {
     } else {
         (authority.to_string(), 443)
     }
+}
+
+/// Response metadata captured for audit logging.
+struct ResponseMeta {
+    status: u16,
+    headers: HashMap<String, String>,
+    body: Option<Bytes>,
+    content_type: Option<String>,
+}
+
+/// Extract response metadata from status, headers, and body bytes.
+fn capture_response_meta(
+    status: hyper::StatusCode,
+    headers: &hyper::HeaderMap,
+    body: &Bytes,
+) -> ResponseMeta {
+    let mut resp_headers = HashMap::new();
+    for (name, value) in headers {
+        if let Ok(v) = value.to_str() {
+            resp_headers.insert(name.to_string().to_lowercase(), v.to_string());
+        }
+    }
+    let content_type = resp_headers.get("content-type").cloned();
+    let body = if body.is_empty() { None } else { Some(body.clone()) };
+    ResponseMeta {
+        status: status.as_u16(),
+        headers: resp_headers,
+        body,
+        content_type,
+    }
+}
+
+/// Attach response metadata to an audit entry.
+fn set_response_on_entry(entry: &mut AuditEntry, meta: &ResponseMeta) {
+    entry.set_response(
+        meta.status,
+        meta.headers.clone(),
+        meta.body.as_deref(),
+        meta.content_type.as_deref(),
+    );
 }
 
 fn blocked_response(reason: &str) -> Response<Full<Bytes>> {

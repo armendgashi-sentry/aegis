@@ -46,6 +46,15 @@ pub struct AuditEntry {
     /// Secrets injected on this request (masked values, only for allowed requests).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets_applied: Vec<SecretApplied>,
+    /// HTTP response status code (None for shell commands or pre-response denials in older logs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_status: Option<u16>,
+    /// HTTP response headers.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub response_headers: std::collections::HashMap<String, String>,
+    /// HTTP response body (truncated to 4KB, text/json only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_body: Option<String>,
 }
 
 /// Maximum body size stored in audit entries (4KB).
@@ -75,6 +84,9 @@ impl AuditEntry {
             body: None,
             content_type: None,
             secrets_applied: Vec::new(),
+            response_status: None,
+            response_headers: std::collections::HashMap::new(),
+            response_body: None,
         }
     }
 
@@ -115,7 +127,53 @@ impl AuditEntry {
             body: body_str,
             content_type,
             secrets_applied: Vec::new(),
+            response_status: None,
+            response_headers: std::collections::HashMap::new(),
+            response_body: None,
         }
+    }
+
+    /// Set response data on this audit entry.
+    pub fn set_response(
+        &mut self,
+        status: u16,
+        headers: std::collections::HashMap<String, String>,
+        body: Option<&[u8]>,
+        content_type: Option<&str>,
+    ) {
+        self.response_status = Some(status);
+        self.response_headers = headers;
+        self.response_body = Self::truncate_response_body(body, content_type);
+    }
+
+    /// Truncate response body for storage. Only stores text/json content types.
+    fn truncate_response_body(body: Option<&[u8]>, content_type: Option<&str>) -> Option<String> {
+        let body = body?;
+        if body.is_empty() {
+            return None;
+        }
+
+        // Only store text-based responses
+        let ct = content_type.unwrap_or("");
+        let is_text = ct.starts_with("text/")
+            || ct.contains("json")
+            || ct.contains("xml")
+            || ct.contains("html")
+            || ct.contains("javascript")
+            || ct.contains("css")
+            || ct.contains("csv");
+
+        if !is_text {
+            return None;
+        }
+
+        std::str::from_utf8(body).ok().map(|s| {
+            if s.len() > MAX_BODY_LOG {
+                format!("{}…[truncated, {} bytes total]", &s[..MAX_BODY_LOG], s.len())
+            } else {
+                s.to_string()
+            }
+        })
     }
 }
 

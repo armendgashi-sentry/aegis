@@ -472,6 +472,50 @@ fn draw_detail_pane(f: &mut Frame, area: Rect, entry: &AuditEntry, scroll: usize
         lines.push(Line::from(Span::styled("  (no body)", s_dim)));
     }
 
+    // HTTP Response
+    if let Some(status) = entry.response_status {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  ── HTTP Response ──", s_label)));
+
+        let status_color = if status < 300 {
+            theme::GREEN
+        } else if status < 500 {
+            theme::YELLOW
+        } else {
+            theme::RED
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("  Status: ", s_label),
+            Span::styled(
+                status.to_string(),
+                Style::default().fg(status_color).bg(theme::BG_CARD).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // Response headers
+        if !entry.response_headers.is_empty() {
+            let mut header_keys: Vec<_> = entry.response_headers.keys().collect();
+            header_keys.sort();
+            for key in header_keys {
+                let val = &entry.response_headers[key];
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {key}: "), s_dim),
+                    Span::styled(val.as_str(), s_dim),
+                ]));
+            }
+        }
+
+        // Response body
+        if let Some(ref resp_body) = entry.response_body {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("  ── Response Body ──", s_label)));
+            for body_line in resp_body.lines() {
+                lines.push(Line::from(Span::styled(format!("  {body_line}"), s_value)));
+            }
+        }
+    }
+
     // Secrets Injected
     if !entry.secrets_applied.is_empty() {
         lines.push(Line::from(""));

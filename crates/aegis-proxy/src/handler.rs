@@ -99,25 +99,28 @@ impl ProxyHandler {
         self.bypass.contains(&addr)
     }
 
-    /// Evaluate a request. Returns the verdict (allow/deny).
+    /// Evaluate a request. Returns the verdict and a prepared audit entry.
+    /// The entry is NOT logged — the caller must set response data and call `log_entry()`.
     pub async fn evaluate(
         &self,
         method: &str,
         uri: &str,
         headers: HashMap<String, String>,
         body: Option<Bytes>,
-    ) -> Verdict {
+    ) -> (Verdict, Option<AuditEntry>) {
         // Parse the URL
         let url = match Url::parse(uri) {
             Ok(u) => u,
             Err(_) => {
-                // If we can't parse the URL, try with a scheme prefix
                 match Url::parse(&format!("http://{uri}")) {
                     Ok(u) => u,
                     Err(_) => {
-                        return Verdict::deny(
-                            format!("Failed to parse request URL: {uri}"),
-                            "builtin:proxy",
+                        return (
+                            Verdict::deny(
+                                format!("Failed to parse request URL: {uri}"),
+                                "builtin:proxy",
+                            ),
+                            None,
                         );
                     }
                 }
@@ -131,7 +134,7 @@ impl ProxyHandler {
 
         // Bypass policy for Aegis's own services (guard, web UI)
         if self.is_bypass(&host, port) {
-            return Verdict::allow("bypass:aegis-internal");
+            return (Verdict::allow("bypass:aegis-internal"), None);
         }
 
         // Rate limit check (read lock on rate limiter)
@@ -142,7 +145,7 @@ impl ProxyHandler {
                     format!("Rate limit exceeded for target: {host}"),
                     "builtin:rate_limit",
                 );
-                self.audit.log(&AuditEntry::with_request(
+                let entry = AuditEntry::with_request(
                     verdict.decision,
                     verdict.reason.clone(),
                     verdict.source.clone(),
@@ -153,8 +156,8 @@ impl ProxyHandler {
                     headers.clone(),
                     body.as_deref(),
                     content_type.clone(),
-                ));
-                return verdict;
+                );
+                return (verdict, Some(entry));
             }
         }
 
@@ -169,30 +172,34 @@ impl ProxyHandler {
             content_type: content_type.clone(),
         };
 
-        // Get current engine (Arc clone, nanosecond lock hold)
         let engine = self.config.engine();
         let verdict = engine.evaluate_http(&ctx).await;
 
-        // Engine logs Deny decisions internally. For Allow decisions,
-        // we log here with secrets_applied metadata.
-        if verdict.decision == Decision::Allow {
-            let secrets_applied = self.check_secrets_metadata(&host, &path);
-            let mut entry = AuditEntry::with_request(
-                verdict.decision,
-                verdict.reason.clone(),
-                verdict.source.clone(),
-                method.to_string(),
-                uri.to_string(),
-                host,
-                Layer::Proxy,
-                headers,
-                body.as_deref(),
-                content_type,
-            );
-            entry.secrets_applied = secrets_applied;
-            self.audit.log(&entry);
-        }
+        let secrets_applied = if verdict.decision == Decision::Allow {
+            self.check_secrets_metadata(&host, &path)
+        } else {
+            Vec::new()
+        };
 
-        verdict
+        let mut entry = AuditEntry::with_request(
+            verdict.decision,
+            verdict.reason.clone(),
+            verdict.source.clone(),
+            method.to_string(),
+            uri.to_string(),
+            host,
+            Layer::Proxy,
+            headers,
+            body.as_deref(),
+            content_type,
+        );
+        entry.secrets_applied = secrets_applied;
+
+        (verdict, Some(entry))
+    }
+
+    /// Log a finalized audit entry (after response data has been attached).
+    pub fn log_entry(&self, entry: &AuditEntry) {
+        self.audit.log(entry);
     }
 }

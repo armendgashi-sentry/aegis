@@ -410,11 +410,11 @@ async fn audit_events_are_broadcast() {
     engine.evaluate_http(&ctx2).await;
     engine.evaluate_shell(&ctx3);
 
-    // Read audit log — HTTP Allow decisions are logged by the proxy handler
-    // (to enrich with secrets_applied metadata), so only Deny + shell are here.
+    // Read audit log — HTTP decisions are now logged by the proxy layer
+    // (to capture response data), so only shell events appear here.
     let content = std::fs::read_to_string(&log_path).unwrap();
     let lines: Vec<&str> = content.trim().lines().collect();
-    assert_eq!(lines.len(), 2); // DELETE deny + shell deny
+    assert_eq!(lines.len(), 1); // shell deny only
 
     // Verify each line is valid JSON with expected fields
     for line in &lines {
@@ -423,7 +423,6 @@ async fn audit_events_are_broadcast() {
         assert!(entry.get("timestamp").is_some());
         assert!(entry.get("decision").is_some());
         assert!(entry.get("method").is_some());
-        // All logged entries should be deny decisions
         assert_eq!(entry["decision"], "deny");
     }
 }

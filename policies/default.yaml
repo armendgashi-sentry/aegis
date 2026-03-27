@@ -24,7 +24,7 @@ http:
       - shutdown
       - reboot
 
-  max_request_body: 10485760
+  max_request_body: 10485760  # 10MB
 
 shell:
   block_patterns:

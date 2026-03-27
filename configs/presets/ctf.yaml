@@ -29,6 +29,6 @@ shell:
   block_sql_in_cli: false
 
 rate_limit:
-  requests_per_second: 100
-  burst: 500
+  requests_per_second: 1000
+  burst: 5000
   per_target: true

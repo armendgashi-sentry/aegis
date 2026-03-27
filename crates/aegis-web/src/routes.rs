@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Json};
 use bytes::Bytes;
 
 use aegis_core::analyzer::{RequestContext, ShellContext};
-use aegis_core::audit;
+use aegis_core::audit::{self, AuditEntry, Layer};
 use aegis_core::decision::Decision;
 
 use crate::state::AppState;
@@ -222,6 +222,21 @@ pub async fn evaluate_http(
 
     let engine = state.config.engine();
     let verdict = engine.evaluate_http(&ctx).await;
+
+    // Log the evaluation (no response data since this is a policy query, not a proxied request)
+    let entry = AuditEntry::with_request(
+        verdict.decision,
+        verdict.reason.clone(),
+        verdict.source.clone(),
+        ctx.method.clone(),
+        ctx.url.to_string(),
+        ctx.host.clone(),
+        Layer::Proxy,
+        ctx.headers.clone(),
+        ctx.body.as_deref(),
+        ctx.content_type.clone(),
+    );
+    state.audit.log(&entry);
 
     Json(serde_json::json!({
         "decision": format!("{:?}", verdict.decision).to_lowercase(),

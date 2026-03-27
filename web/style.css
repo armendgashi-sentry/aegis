@@ -564,6 +564,57 @@ main {
   text-decoration-color: var(--red);
 }
 
+/* Response display */
+.response-display {
+  background: var(--bg);
+  border: 1px solid var(--cyan);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.response-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.response-label {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--cyan);
+  letter-spacing: 2px;
+}
+
+.response-status {
+  font-family: var(--pixel-font);
+  font-size: 12px;
+  font-weight: bold;
+  padding: 2px 8px;
+}
+
+.response-status.status-2xx {
+  color: var(--green);
+  border: 1px solid var(--green);
+}
+
+.response-status.status-3xx {
+  color: var(--yellow);
+  border: 1px solid var(--yellow);
+}
+
+.response-status.status-4xx {
+  color: var(--yellow);
+  border: 1px solid var(--yellow);
+}
+
+.response-status.status-5xx {
+  color: var(--red);
+  border: 1px solid var(--red);
+}
+
 /* Secrets injection display */
 .secrets-section {
   background: var(--bg);
