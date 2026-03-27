@@ -10,6 +10,9 @@ let allowedCount = 0;
 let deniedCount = 0;
 let lastSecondCount = 0;
 let rpsInterval = null;
+let liveSearchQuery = '';
+let livePage = 0;
+const PAGE_SIZE = 1000;
 
 // DOM elements
 const statusDot = document.getElementById('status-dot');
@@ -29,6 +32,18 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
     currentFilter = btn.dataset.filter;
     renderEvents();
   });
+});
+
+// Live search
+const liveSearchInput = document.getElementById('live-search');
+let liveSearchTimer = null;
+liveSearchInput.addEventListener('input', () => {
+  clearTimeout(liveSearchTimer);
+  liveSearchTimer = setTimeout(() => {
+    liveSearchQuery = liveSearchInput.value.trim().toLowerCase();
+    livePage = 0;
+    renderEvents();
+  }, 150);
 });
 
 // WebSocket connection
@@ -86,20 +101,27 @@ function handleEvent(entry) {
 
 function renderEvents() {
   const filtered = filterEvents();
+  const total = filtered.length;
+  const start = livePage * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, total);
+  const page = filtered.slice(start, end);
 
-  if (filtered.length === 0) {
+  if (page.length === 0) {
     eventsBody.innerHTML = `
       <div class="empty-state">
-        <p>NO EVENTS${currentFilter !== 'all' ? ` (${currentFilter.toUpperCase()})` : ''}</p>
+        <p>NO EVENTS${currentFilter !== 'all' ? ` (${currentFilter.toUpperCase()})` : ''}${liveSearchQuery ? ` matching "${escapeHtml(liveSearchQuery)}"` : ''}</p>
         <p class="blink">_</p>
       </div>`;
+    document.getElementById('live-pagination').style.display = 'none';
     return;
   }
 
   eventsBody.innerHTML = '';
-  filtered.forEach(entry => {
+  page.forEach(entry => {
     eventsBody.appendChild(createEventRow(entry));
   });
+
+  renderPagination('live-pagination', total, livePage, (p) => { livePage = p; renderEvents(); });
 }
 
 function renderNewEvent(entry) {
@@ -285,9 +307,44 @@ function toggleDetail(entry, row) {
   panel.innerHTML = `
     <div class="detail-header">
       <span class="detail-title ${decisionClass}">// REQUEST DETAIL — ${decisionText}</span>
-      <button class="detail-close" onclick="closeDetail()">✕ CLOSE</button>
+      <div class="detail-actions">
+        <button class="detail-replay-btn" id="replay-btn">▶ REPLAY</button>
+        <button class="detail-replay-btn edit" id="edit-replay-btn">✎ EDIT & REPLAY</button>
+        <button class="detail-close" onclick="closeDetail()">✕ CLOSE</button>
+      </div>
     </div>
     <div class="request-display">${requestHtml}</div>
+    <div class="replay-editor" id="replay-editor" style="display:none;">
+      <div class="replay-editor-title">// EDIT REQUEST</div>
+      <div class="replay-editor-row">
+        <label>METHOD</label>
+        <select id="replay-method" class="config-input replay-input-sm">
+          ${['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(m =>
+            `<option value="${m}" ${m === entry.method ? 'selected' : ''}>${m}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="replay-editor-row">
+        <label>URL</label>
+        <input type="text" id="replay-url" class="config-input" value="${escapeAttr(entry.url || '')}" />
+      </div>
+      <div class="replay-editor-row">
+        <label>HEADERS</label>
+        <textarea id="replay-headers" class="config-input replay-textarea" rows="4">${escapeHtml(
+          Object.entries(entry.headers || {})
+            .filter(([k]) => k.toLowerCase() !== 'proxy-connection' && k.toLowerCase() !== 'host')
+            .map(([k, v]) => `${k}: ${v}`).join('\n')
+        )}</textarea>
+      </div>
+      <div class="replay-editor-row">
+        <label>BODY</label>
+        <textarea id="replay-body" class="config-input replay-textarea" rows="3">${escapeHtml(entry.body || '')}</textarea>
+      </div>
+      <div class="config-form-actions">
+        <button class="detail-replay-btn" id="send-edited-replay">▶ SEND</button>
+        <button class="filter-btn" id="cancel-edit-replay">CANCEL</button>
+      </div>
+    </div>
     ${secretsHtml}
     ${responseHtml}
     ${entry.reason ? `<div class="detail-reason ${reasonClass}">${escapeHtml(entry.reason)}</div>` : ''}
@@ -304,6 +361,36 @@ function toggleDetail(entry, row) {
   `;
 
   row.after(panel);
+
+  // Wire up replay button (sends original as-is)
+  panel.querySelector('#replay-btn').addEventListener('click', () => replayRequest(entry));
+
+  // Wire up edit & replay
+  const editor = panel.querySelector('#replay-editor');
+  panel.querySelector('#edit-replay-btn').addEventListener('click', () => {
+    editor.style.display = editor.style.display === 'none' ? '' : 'none';
+  });
+  panel.querySelector('#cancel-edit-replay').addEventListener('click', () => {
+    editor.style.display = 'none';
+  });
+  panel.querySelector('#send-edited-replay').addEventListener('click', () => {
+    const method = panel.querySelector('#replay-method').value;
+    const url = panel.querySelector('#replay-url').value;
+    const headersText = panel.querySelector('#replay-headers').value;
+    const body = panel.querySelector('#replay-body').value || null;
+
+    // Parse headers from "Key: Value" lines
+    const headers = {};
+    headersText.split('\n').forEach(line => {
+      const idx = line.indexOf(':');
+      if (idx > 0) {
+        headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+      }
+    });
+
+    replayRequest({ method, url, headers, body });
+    editor.style.display = 'none';
+  });
 }
 
 function extractBlockedPattern(reason) {
@@ -334,18 +421,123 @@ function closeDetail() {
 }
 
 function filterEvents() {
-  if (currentFilter === 'all') return events;
-  return events.filter(e => {
-    if (currentFilter === 'allow') return e.decision === 'allow';
-    if (currentFilter === 'deny') return e.decision === 'deny';
-    return true;
-  });
+  let filtered = events;
+  if (currentFilter !== 'all') {
+    filtered = filtered.filter(e => {
+      if (currentFilter === 'allow') return e.decision === 'allow';
+      if (currentFilter === 'deny') return e.decision === 'deny';
+      return true;
+    });
+  }
+  if (liveSearchQuery) {
+    filtered = filtered.filter(e => matchesSearch(e, liveSearchQuery));
+  }
+  return filtered;
+}
+
+function matchesSearch(entry, query) {
+  return (entry.url || '').toLowerCase().includes(query)
+    || (entry.method || '').toLowerCase().includes(query)
+    || (entry.reason || '').toLowerCase().includes(query)
+    || (entry.source || '').toLowerCase().includes(query)
+    || (entry.host || '').toLowerCase().includes(query)
+    || (entry.body || '').toLowerCase().includes(query);
 }
 
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function escapeAttr(str) {
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Pagination renderer
+function renderPagination(containerId, total, currentPage, onPageChange) {
+  const container = document.getElementById(containerId);
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  if (totalPages <= 1) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = '';
+  const start = currentPage * PAGE_SIZE + 1;
+  const end = Math.min((currentPage + 1) * PAGE_SIZE, total);
+
+  let html = `<span class="page-info">${start}-${end} of ${total}</span>`;
+  html += `<button class="page-btn" ${currentPage === 0 ? 'disabled' : ''} data-page="prev">◂ PREV</button>`;
+
+  // Show max 7 page buttons
+  const maxBtns = 7;
+  let pageStart = Math.max(0, currentPage - 3);
+  let pageEnd = Math.min(totalPages, pageStart + maxBtns);
+  if (pageEnd - pageStart < maxBtns) pageStart = Math.max(0, pageEnd - maxBtns);
+
+  for (let i = pageStart; i < pageEnd; i++) {
+    html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" data-page="${i}">${i + 1}</button>`;
+  }
+
+  html += `<button class="page-btn" ${currentPage >= totalPages - 1 ? 'disabled' : ''} data-page="next">NEXT ▸</button>`;
+  container.innerHTML = html;
+
+  container.querySelectorAll('.page-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.page;
+      if (p === 'prev') onPageChange(currentPage - 1);
+      else if (p === 'next') onPageChange(currentPage + 1);
+      else onPageChange(parseInt(p));
+    });
+  });
+}
+
+// Replay request
+async function replayRequest(entry) {
+  const payload = {
+    method: entry.method,
+    url: entry.url,
+    headers: entry.headers || {},
+    body: entry.body || null,
+  };
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/replay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+
+    // The replayed request is logged and will appear via WebSocket
+    // Show a brief notification
+    showNotification(
+      data.decision === 'allow'
+        ? `Replay: ${data.response?.status || 'sent'} — ALLOW`
+        : `Replay: BLOCKED — ${data.reason}`
+    );
+  } catch (e) {
+    showNotification(`Replay failed: ${e.message}`);
+  }
+}
+
+function showNotification(msg) {
+  let el = document.getElementById('notification');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'notification';
+    el.className = 'notification';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.display = '';
+  el.style.opacity = '1';
+  setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => { el.style.display = 'none'; }, 300);
+  }, 3000);
 }
 
 // RPS counter
@@ -369,6 +561,10 @@ async function fetchStats() {
 let currentMode = 'live';
 let logFilter = 'all';
 let logEntries = [];
+let logSearchQuery = '';
+let logPage = 0;
+let logTotalEntries = 0;
+let currentLogFile = '';
 
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -400,21 +596,38 @@ const logFileSelect = document.getElementById('log-file-select');
 const logEventsBody = document.getElementById('log-events-body');
 const logStats = document.getElementById('log-stats');
 
-// Log filter buttons
+// Log filter buttons — trigger server-side re-fetch
 document.querySelectorAll('[data-log-filter]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('[data-log-filter]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     logFilter = btn.dataset.logFilter;
-    renderLogEntries();
+    logPage = 0;
+    if (currentLogFile) fetchLogEntries(currentLogFile);
   });
 });
 
 logFileSelect.addEventListener('change', () => {
   const file = logFileSelect.value;
   if (file) {
+    currentLogFile = file;
+    logPage = 0;
+    logSearchQuery = '';
+    document.getElementById('log-search').value = '';
     fetchLogEntries(file);
   }
+});
+
+// Log search
+const logSearchInput = document.getElementById('log-search');
+let logSearchTimer = null;
+logSearchInput.addEventListener('input', () => {
+  clearTimeout(logSearchTimer);
+  logSearchTimer = setTimeout(() => {
+    logSearchQuery = logSearchInput.value.trim();
+    logPage = 0;
+    if (currentLogFile) fetchLogEntries(currentLogFile);
+  }, 300);
 });
 
 async function fetchLogFiles() {
@@ -442,7 +655,12 @@ async function fetchLogEntries(file) {
         <p class="blink">_</p>
       </div>`;
 
-    const resp = await fetch(`${API_BASE}/api/logs/entries?file=${encodeURIComponent(file)}`);
+    const offset = logPage * PAGE_SIZE;
+    let url = `${API_BASE}/api/logs/entries?file=${encodeURIComponent(file)}&limit=${PAGE_SIZE}&offset=${offset}`;
+    if (logFilter !== 'all') url += `&decision=${logFilter}`;
+    if (logSearchQuery) url += `&search=${encodeURIComponent(logSearchQuery)}`;
+
+    const resp = await fetch(url);
     const data = await resp.json();
 
     if (data.error) {
@@ -454,6 +672,7 @@ async function fetchLogEntries(file) {
     }
 
     logEntries = data.entries || [];
+    logTotalEntries = data.stats?.total || logEntries.length;
 
     // Update log stats (inline + main stat cards)
     if (data.stats) {
@@ -461,18 +680,18 @@ async function fetchLogEntries(file) {
       document.getElementById('log-stat-total').textContent = data.stats.total || 0;
       document.getElementById('log-stat-allowed').textContent = data.stats.allowed || 0;
       document.getElementById('log-stat-denied').textContent = data.stats.denied || 0;
-      // Also update main stat cards to reflect loaded log
       statTotal.textContent = data.stats.total || 0;
       statAllowed.textContent = data.stats.allowed || 0;
       statDenied.textContent = data.stats.denied || 0;
     }
 
-    // Set "ALL" filter as active
-    document.querySelectorAll('[data-log-filter]').forEach(b => b.classList.remove('active'));
-    document.getElementById('log-filter-all').classList.add('active');
-    logFilter = 'all';
-
     renderLogEntries();
+
+    // Pagination for logs (server-side)
+    renderPagination('log-pagination', logTotalEntries, logPage, (p) => {
+      logPage = p;
+      fetchLogEntries(currentLogFile);
+    });
   } catch (e) {
     console.error('Failed to fetch log entries:', e);
     logEventsBody.innerHTML = `
@@ -483,24 +702,17 @@ async function fetchLogEntries(file) {
 }
 
 function renderLogEntries() {
-  const filtered = logEntries.filter(e => {
-    if (logFilter === 'all') return true;
-    if (logFilter === 'allow') return e.decision === 'allow';
-    if (logFilter === 'deny') return e.decision === 'deny';
-    return true;
-  });
-
-  if (filtered.length === 0) {
+  if (logEntries.length === 0) {
     logEventsBody.innerHTML = `
       <div class="empty-state">
-        <p>NO ENTRIES${logFilter !== 'all' ? ` (${logFilter.toUpperCase()})` : ''}</p>
+        <p>NO ENTRIES${logFilter !== 'all' ? ` (${logFilter.toUpperCase()})` : ''}${logSearchQuery ? ` matching "${escapeHtml(logSearchQuery)}"` : ''}</p>
         <p class="blink">_</p>
       </div>`;
     return;
   }
 
   logEventsBody.innerHTML = '';
-  filtered.forEach(entry => {
+  logEntries.forEach(entry => {
     logEventsBody.appendChild(createEventRow(entry));
   });
 }

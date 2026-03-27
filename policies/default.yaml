@@ -1,45 +1,39 @@
 http:
   methods:
     safe: [GET, HEAD, OPTIONS, TRACE]
-    inspect: [POST, PUT, PATCH]
-    block: [DELETE]
+    inspect: [POST, PUT, PATCH, DELETE]
+    block: []
 
   payload:
     block_sql:
       - DROP
-      - DELETE
       - TRUNCATE
-      - "ALTER TABLE"
-      - UPDATE
     allow_sql:
       - SELECT
       - UNION
       - SHOW
       - DESCRIBE
+      - DELETE
+      - UPDATE
+      - INSERT
     block_commands:
-      - "rm -rf"
-      - "rm -r"
-      - "dd if="
-      - mkfs
-      - shutdown
-      - reboot
+      - "rm -rf /"
+      - "dd if=/dev/zero of=/dev"
+      - "mkfs."
 
-  max_request_body: 10485760  # 10MB
+  max_request_body: 52428800  # 50MB
 
 shell:
   block_patterns:
-    - "rm -rf"
-    - "rm -r"
-    - rmdir
-    - "dd if="
-    - mkfs
-    - shred
-    - "> /dev/"
+    - "rm -rf /"
+    - "dd if=/dev/zero of=/dev"
+    - "mkfs."
+    - "> /dev/sda"
     - shutdown
     - reboot
   block_sql_in_cli: true
 
 rate_limit:
-  requests_per_second: 10
-  burst: 50
+  requests_per_second: 50
+  burst: 200
   per_target: true

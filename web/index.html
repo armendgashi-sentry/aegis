@@ -52,6 +52,7 @@
       <div class="section-header">
         <h2>// LIVE FEED</h2>
         <div class="filters">
+          <input type="text" class="search-input" id="live-search" placeholder="/ SEARCH..." autocomplete="off" />
           <button class="filter-btn active" data-filter="all">ALL</button>
           <button class="filter-btn" data-filter="allow">ALLOW</button>
           <button class="filter-btn" data-filter="deny">BLOCK</button>
@@ -74,6 +75,7 @@
           </div>
         </div>
       </div>
+      <div class="pagination" id="live-pagination" style="display:none;"></div>
     </section>
 
     <section class="events-section" id="logs-section" style="display: none;">
@@ -83,6 +85,7 @@
           <select id="log-file-select" class="log-select">
             <option value="">SELECT LOG FILE...</option>
           </select>
+          <input type="text" class="search-input" id="log-search" placeholder="/ SEARCH..." autocomplete="off" />
           <button class="filter-btn" data-log-filter="all" id="log-filter-all">ALL</button>
           <button class="filter-btn" data-log-filter="allow" id="log-filter-allow">ALLOW</button>
           <button class="filter-btn" data-log-filter="deny" id="log-filter-deny">BLOCK</button>
@@ -111,6 +114,7 @@
           </div>
         </div>
       </div>
+      <div class="pagination" id="log-pagination"></div>
     </section>
 
     <section class="events-section" id="config-section" style="display: none;">

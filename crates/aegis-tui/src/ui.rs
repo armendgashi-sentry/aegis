@@ -55,7 +55,8 @@ pub fn draw_live(f: &mut Frame, app: &App) {
 
     draw_header(f, chunks[0], true);
     draw_stats(f, chunks[1], app.total, app.allowed, app.denied, app.rps);
-    draw_filter_bar(f, chunks[2], app.filter, None, app.is_detail_open());
+    let status_msg = app.status_message.as_ref().map(|(s, _)| s.as_str());
+    draw_filter_bar(f, chunks[2], app.filter, None, app.is_detail_open(), &app.search_query, app.search_active, status_msg);
 
     let filtered = app.filtered_events();
 
@@ -99,7 +100,7 @@ pub fn draw_log_viewer(f: &mut Frame, viewer: &LogViewer) {
         f, chunks[1],
         viewer.total() as u64, viewer.allowed() as u64, viewer.denied() as u64, 0,
     );
-    draw_filter_bar(f, chunks[2], viewer.filter, Some(&viewer.file_name), viewer.is_detail_open());
+    draw_filter_bar(f, chunks[2], viewer.filter, Some(&viewer.file_name), viewer.is_detail_open(), &viewer.search_query, viewer.search_active, None);
 
     let filtered = viewer.filtered_entries();
 
@@ -211,7 +212,16 @@ fn draw_stat_box(f: &mut Frame, area: Rect, label: &str, value: &str, accent: ra
 
 // ─── filter bar ─────────────────────────────────────────────────────
 
-fn draw_filter_bar(f: &mut Frame, area: Rect, current: Filter, file_name: Option<&str>, detail_open: bool) {
+fn draw_filter_bar(
+    f: &mut Frame,
+    area: Rect,
+    current: Filter,
+    file_name: Option<&str>,
+    detail_open: bool,
+    search_query: &str,
+    search_active: bool,
+    status_message: Option<&str>,
+) {
     let filters = [Filter::All, Filter::Allow, Filter::Block];
     let mut spans = vec![Span::styled(" ", bg())];
 
@@ -233,13 +243,26 @@ fn draw_filter_bar(f: &mut Frame, area: Rect, current: Filter, file_name: Option
         }
     }
 
-    let hint = match (file_name, detail_open) {
-        (Some(name), true) => format!("   ◆ {name}   [Enter] close  [↑↓] detail scroll  [Esc] back"),
-        (Some(name), false) => format!("   ◆ {name}   [TAB] filter  [↑↓] scroll  [Enter] expand  [q] quit"),
-        (_, true) => "   [Enter] close  [↑↓] scroll detail  [Esc] back".into(),
-        (_, false) => "   [TAB] filter  [↑↓] scroll  [Enter] expand  [c] config  [q] quit".into(),
-    };
-    spans.push(Span::styled(hint, Style::default().fg(theme::TEXT_DIM).bg(theme::BG)));
+    // Search display
+    if search_active {
+        spans.push(Span::styled("  /", Style::default().fg(theme::YELLOW).bg(theme::BG)));
+        spans.push(Span::styled(search_query, Style::default().fg(theme::TEXT_BRIGHT).bg(theme::BG)));
+        spans.push(Span::styled("█", Style::default().fg(theme::CYAN).bg(theme::BG)));
+        spans.push(Span::styled("  [Enter] search  [Esc] cancel", Style::default().fg(theme::TEXT_DIM).bg(theme::BG)));
+    } else if !search_query.is_empty() {
+        spans.push(Span::styled(format!("  /{search_query}"), Style::default().fg(theme::YELLOW).bg(theme::BG)));
+        spans.push(Span::styled("  [Esc] clear", Style::default().fg(theme::TEXT_DIM).bg(theme::BG)));
+    } else if let Some(msg) = status_message {
+        spans.push(Span::styled(format!("  {msg}"), Style::default().fg(theme::GREEN).bg(theme::BG)));
+    } else {
+        let hint = match (file_name, detail_open) {
+            (Some(name), true) => format!("   ◆ {name}   [Enter] close  [↑↓] detail  [r] replay  [Esc] back"),
+            (Some(name), false) => format!("   ◆ {name}   [TAB] filter  [/] search  [Enter] expand  [r] replay  [q] quit"),
+            (_, true) => "   [Enter] close  [↑↓] detail  [r] replay  [Esc] back".into(),
+            (_, false) => "   [TAB] filter  [/] search  [Enter] expand  [r] replay  [c] config  [q] quit".into(),
+        };
+        spans.push(Span::styled(hint, Style::default().fg(theme::TEXT_DIM).bg(theme::BG)));
+    }
 
     f.render_widget(Paragraph::new(Line::from(spans)).style(bg()), area);
 }
@@ -633,6 +656,119 @@ fn highlight_pattern<'a>(
     }
 
     spans
+}
+
+// ─── replay editor ──────────────────────────────────────────────────
+
+pub fn draw_replay_editor(f: &mut Frame, app: &App) {
+    f.render_widget(Clear, f.area());
+    f.render_widget(Block::default().style(bg()), f.area());
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),  // header
+            Constraint::Min(10),   // editor
+            Constraint::Length(1), // footer
+        ])
+        .split(f.area());
+
+    draw_header(f, chunks[0], true);
+
+    let Some(ref editor) = app.replay_editor else {
+        return;
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::YELLOW).bg(theme::BG_CARD))
+        .title(Span::styled(
+            " EDIT & REPLAY ",
+            Style::default().fg(theme::YELLOW).bg(theme::BG_CARD).add_modifier(Modifier::BOLD),
+        ))
+        .style(card());
+
+    let inner = block.inner(chunks[1]);
+    f.render_widget(block, chunks[1]);
+
+    let s_label = Style::default().fg(theme::CYAN).bg(theme::BG_CARD);
+    let s_value = Style::default().fg(theme::TEXT_BRIGHT).bg(theme::BG_CARD);
+    let s_dim = Style::default().fg(theme::TEXT_DIM).bg(theme::BG_CARD);
+    let s_active = Style::default().fg(theme::YELLOW).bg(theme::BG_CARD).add_modifier(Modifier::BOLD);
+
+    let fields = [
+        ("METHOD", &editor.method),
+        ("URL", &editor.url),
+        ("BODY", &editor.body),
+    ];
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    lines.push(Line::from(""));
+
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let is_focused = i == editor.focus;
+        let label_style = if is_focused { s_active } else { s_label };
+        let value_style = if is_focused { s_active } else { s_value };
+
+        let cursor = if is_focused { "█" } else { "" };
+        let indicator = if is_focused { "▶ " } else { "  " };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {indicator}{label:<8}"), label_style),
+            Span::styled(format!("{value}{cursor}"), value_style),
+        ]));
+
+        if i == 0 {
+            lines.push(Line::from(Span::styled(
+                if is_focused { "               (press any key to cycle method)" } else { "" },
+                s_dim,
+            )));
+        }
+
+        lines.push(Line::from(""));
+    }
+
+    // Headers (read-only display)
+    lines.push(Line::from(Span::styled("  HEADERS (from original request)", s_dim)));
+    let mut header_keys: Vec<_> = editor.headers.keys().collect();
+    header_keys.sort();
+    for key in header_keys.iter().take(8) {
+        let val = &editor.headers[*key];
+        lines.push(Line::from(vec![
+            Span::styled(format!("    {key}: "), s_dim),
+            Span::styled(val.as_str(), s_dim),
+        ]));
+    }
+    if header_keys.len() > 8 {
+        lines.push(Line::from(Span::styled(
+            format!("    ... and {} more", header_keys.len() - 8),
+            s_dim,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  [Tab] ", s_label),
+        Span::styled("next field  ", s_dim),
+        Span::styled("[Enter] ", Style::default().fg(theme::GREEN).bg(theme::BG_CARD)),
+        Span::styled("send  ", s_dim),
+        Span::styled("[Esc] ", s_label),
+        Span::styled("cancel", s_dim),
+    ]));
+
+    f.render_widget(
+        Paragraph::new(lines).style(card()).wrap(Wrap { trim: false }),
+        inner,
+    );
+
+    // Footer
+    let footer = Line::from(vec![
+        Span::styled(format!(" AEGIS v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(theme::TEXT_DIM).bg(theme::BG)),
+        Span::styled(" │ ", Style::default().fg(theme::BORDER).bg(theme::BG)),
+        Span::styled("EDIT & REPLAY", Style::default().fg(theme::YELLOW).bg(theme::BG)),
+    ]);
+    f.render_widget(Paragraph::new(footer).style(bg()), chunks[2]);
 }
 
 // ─── footer ─────────────────────────────────────────────────────────

@@ -83,6 +83,11 @@ impl RuntimeConfig {
         &self.policies_dir
     }
 
+    /// Get the audit logger (for replay logging).
+    pub fn audit(&self) -> &AuditLogger {
+        &self.audit
+    }
+
     // --- Initial setup ---
 
     /// Set the secrets config (called once during startup).

@@ -89,10 +89,12 @@ pub async fn list_logs(State(state): State<Arc<AppState>>) -> Json<serde_json::V
 pub struct LogQuery {
     pub file: String,
     pub limit: Option<usize>,
+    pub offset: Option<usize>,
     pub decision: Option<String>,
+    pub search: Option<String>,
 }
 
-/// GET /api/logs/entries?file=<path>&limit=N&decision=allow|deny
+/// GET /api/logs/entries?file=<path>&limit=N&offset=N&decision=allow|deny&search=term
 pub async fn get_log_entries(Query(query): Query<LogQuery>) -> Json<serde_json::Value> {
     let path = Path::new(&query.file);
     let entries = match audit::read_audit_log(path) {
@@ -104,38 +106,68 @@ pub async fn get_log_entries(Query(query): Query<LogQuery>) -> Json<serde_json::
         }
     };
 
+    let search_lower = query.search.as_deref().unwrap_or("").to_lowercase();
+    let has_search = !search_lower.is_empty();
+
     let filtered: Vec<_> = entries
         .into_iter()
         .filter(|entry| {
             if let Some(ref d) = query.decision {
                 match d.as_str() {
-                    "allow" => entry.decision == Decision::Allow,
-                    "deny" => entry.decision == Decision::Deny,
-                    _ => true,
+                    "allow" => {
+                        if entry.decision != Decision::Allow {
+                            return false;
+                        }
+                    }
+                    "deny" => {
+                        if entry.decision != Decision::Deny {
+                            return false;
+                        }
+                    }
+                    _ => {}
                 }
+            }
+            if has_search {
+                entry_matches_search(entry, &search_lower)
             } else {
                 true
             }
         })
         .collect();
 
-    let limited = match query.limit {
-        Some(n) => &filtered[..n.min(filtered.len())],
-        None => &filtered,
-    };
-
     let total = filtered.len();
     let allowed = filtered.iter().filter(|e| e.decision == Decision::Allow).count();
     let denied = filtered.iter().filter(|e| e.decision == Decision::Deny).count();
 
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(1000);
+    let start = offset.min(filtered.len());
+    let end = (start + limit).min(filtered.len());
+    let page = &filtered[start..end];
+
     Json(serde_json::json!({
-        "entries": limited,
+        "entries": page,
         "stats": {
             "total": total,
             "allowed": allowed,
             "denied": denied,
+        },
+        "pagination": {
+            "offset": start,
+            "limit": limit,
+            "has_more": end < total,
         }
     }))
+}
+
+/// Check if an audit entry matches a search query (case-insensitive).
+fn entry_matches_search(entry: &AuditEntry, query: &str) -> bool {
+    entry.url.to_lowercase().contains(query)
+        || entry.method.to_lowercase().contains(query)
+        || entry.reason.to_lowercase().contains(query)
+        || entry.source.to_lowercase().contains(query)
+        || entry.host.to_lowercase().contains(query)
+        || entry.body.as_deref().unwrap_or("").to_lowercase().contains(query)
 }
 
 // --- Evaluate API endpoints (for SDKs) ---
@@ -395,6 +427,159 @@ pub async fn snapshot_commit(
             Json(serde_json::json!({ "error": format!("{e}") })),
         ),
     }
+}
+
+// --- Replay endpoint ---
+
+#[derive(serde::Deserialize)]
+pub struct ReplayRequest {
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    pub body: Option<String>,
+}
+
+/// POST /api/replay — Re-send a captured request, evaluate through policy, forward if allowed, log result.
+pub async fn replay_request(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ReplayRequest>,
+) -> Json<serde_json::Value> {
+    let parsed_url = match url::Url::parse(&req.url) {
+        Ok(u) => u,
+        Err(_) => match url::Url::parse(&format!("http://{}", req.url)) {
+            Ok(u) => u,
+            Err(e) => {
+                return Json(serde_json::json!({
+                    "decision": "deny",
+                    "reason": format!("Invalid URL: {e}"),
+                    "source": "builtin:api",
+                }));
+            }
+        },
+    };
+
+    let host = parsed_url.host_str().unwrap_or("unknown").to_string();
+    let port = parsed_url
+        .port()
+        .unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
+    let path = parsed_url.path().to_string();
+    let content_type = req.headers.get("content-type").cloned();
+    let body_bytes = req.body.as_ref().map(|b| Bytes::from(b.clone()));
+
+    let ctx = RequestContext {
+        method: req.method.clone(),
+        url: parsed_url.clone(),
+        host: host.clone(),
+        port,
+        path: path.clone(),
+        headers: req.headers.clone(),
+        body: body_bytes.clone(),
+        content_type: content_type.clone(),
+    };
+
+    let engine = state.config.engine();
+    let verdict = engine.evaluate_http(&ctx).await;
+
+    let mut entry = AuditEntry::with_request(
+        verdict.decision,
+        verdict.reason.clone(),
+        verdict.source.clone(),
+        req.method.clone(),
+        parsed_url.to_string(),
+        host.clone(),
+        Layer::Proxy,
+        req.headers.clone(),
+        body_bytes.as_deref(),
+        content_type.clone(),
+    );
+
+    // If allowed, actually send the request and capture the response
+    if verdict.decision == Decision::Allow {
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_default();
+
+        let method = match req.method.to_uppercase().as_str() {
+            "GET" => reqwest::Method::GET,
+            "POST" => reqwest::Method::POST,
+            "PUT" => reqwest::Method::PUT,
+            "PATCH" => reqwest::Method::PATCH,
+            "DELETE" => reqwest::Method::DELETE,
+            "HEAD" => reqwest::Method::HEAD,
+            "OPTIONS" => reqwest::Method::OPTIONS,
+            _ => reqwest::Method::GET,
+        };
+
+        let mut request = client.request(method, parsed_url.as_str());
+        for (k, v) in &req.headers {
+            if k.to_lowercase() != "host" && k.to_lowercase() != "proxy-connection" {
+                request = request.header(k.as_str(), v.as_str());
+            }
+        }
+        if let Some(ref b) = req.body {
+            request = request.body(b.clone());
+        }
+
+        match request.send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let resp_ct = resp
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let mut resp_headers = HashMap::new();
+                for (k, v) in resp.headers() {
+                    if let Ok(val) = v.to_str() {
+                        resp_headers.insert(k.to_string(), val.to_string());
+                    }
+                }
+                let resp_body = resp.bytes().await.ok();
+                entry.set_response(
+                    status,
+                    resp_headers.clone(),
+                    resp_body.as_deref(),
+                    resp_ct.as_deref(),
+                );
+
+                state.audit.log(&entry);
+
+                return Json(serde_json::json!({
+                    "decision": "allow",
+                    "reason": verdict.reason,
+                    "source": verdict.source,
+                    "response": {
+                        "status": status,
+                        "headers": resp_headers,
+                        "body": entry.response_body,
+                    },
+                    "entry": entry,
+                }));
+            }
+            Err(e) => {
+                state.audit.log(&entry);
+                return Json(serde_json::json!({
+                    "decision": "allow",
+                    "reason": verdict.reason,
+                    "source": verdict.source,
+                    "error": format!("Request failed: {e}"),
+                    "entry": entry,
+                }));
+            }
+        }
+    }
+
+    // Denied — log and return
+    state.audit.log(&entry);
+    Json(serde_json::json!({
+        "decision": format!("{:?}", verdict.decision).to_lowercase(),
+        "reason": verdict.reason,
+        "source": verdict.source,
+        "entry": entry,
+    }))
 }
 
 async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {

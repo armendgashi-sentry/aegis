@@ -932,6 +932,178 @@ footer {
   }
 }
 
+/* Search input */
+.search-input {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  background: var(--bg);
+  color: var(--text-bright);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  width: 200px;
+  transition: all 0.15s;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--cyan);
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.2);
+  width: 280px;
+}
+
+.search-input::placeholder {
+  color: var(--text-dim);
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.page-info {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  margin-right: 12px;
+}
+
+.page-btn {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.1s;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: var(--cyan);
+  color: var(--text);
+}
+
+.page-btn.active {
+  background: var(--cyan);
+  color: var(--bg);
+  border-color: var(--cyan);
+}
+
+.page-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Replay button */
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.detail-replay-btn {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  background: var(--bg);
+  color: var(--green);
+  border: 1px solid var(--green);
+  padding: 4px 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.15s;
+}
+
+.detail-replay-btn:hover {
+  background: var(--green);
+  color: var(--bg);
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+}
+
+.detail-replay-btn.edit {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.detail-replay-btn.edit:hover {
+  background: var(--yellow);
+  color: var(--bg);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.4);
+}
+
+/* Replay editor */
+.replay-editor {
+  background: var(--bg);
+  border: 1px solid var(--yellow);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  animation: slide-in 0.15s ease-out;
+}
+
+.replay-editor-title {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--yellow);
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+}
+
+.replay-editor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.replay-editor-row label {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  min-width: 70px;
+  padding-top: 8px;
+}
+
+.replay-input-sm {
+  width: 120px;
+  flex: none;
+}
+
+.replay-textarea {
+  resize: vertical;
+  min-height: 40px;
+  font-family: var(--mono-font);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Notification toast */
+.notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--cyan);
+  color: var(--text-bright);
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  padding: 12px 20px;
+  letter-spacing: 1px;
+  z-index: 2000;
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+  transition: opacity 0.3s;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .stats-grid {

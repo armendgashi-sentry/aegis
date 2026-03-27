@@ -32,6 +32,7 @@ pub async fn start_web_server(
         .route("/api/live", get(routes::live_events))
         .route("/api/evaluate/shell", post(routes::evaluate_shell))
         .route("/api/evaluate/http", post(routes::evaluate_http))
+        .route("/api/replay", post(routes::replay_request))
         .route("/api/secrets/status", get(routes::secrets_status))
         // Snapshot endpoints
         .route("/api/snapshot/create", post(routes::snapshot_create))

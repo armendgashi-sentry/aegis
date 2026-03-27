@@ -23,7 +23,7 @@ use tokio::sync::broadcast;
 use aegis_core::audit::{self, AuditEntry};
 use aegis_core::runtime::RuntimeConfig;
 
-use app::{App, LogViewer, Screen};
+use app::{App, LogViewer, ReplayEditor, Screen};
 
 /// Run the live TUI dashboard, subscribing to broadcast events.
 pub async fn run_live(
@@ -45,6 +45,7 @@ pub async fn run_live(
         terminal.draw(|f| match app.screen {
             Screen::Live => ui::draw_live(f, &app),
             Screen::Config => config_ui::draw_config(f, &app),
+            Screen::ReplayEdit => ui::draw_replay_editor(f, &app),
         })?;
 
         if crossterm::event::poll(Duration::from_millis(50))? {
@@ -56,6 +57,11 @@ pub async fn run_live(
                 }
                 Screen::Config => {
                     if handle_config_input(&mut app, config.as_ref())? {
+                        break;
+                    }
+                }
+                Screen::ReplayEdit => {
+                    if handle_replay_edit_input(&mut app, config.as_ref())? {
                         break;
                     }
                 }
@@ -76,6 +82,7 @@ pub async fn run_live(
         }
 
         app.update_rps();
+        app.clear_expired_status();
 
         if app.should_quit {
             break;
@@ -200,7 +207,31 @@ pub fn run_log_viewer(path: &Path) -> anyhow::Result<()> {
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if viewer.is_detail_open() {
+                // Search mode
+                if viewer.search_active {
+                    match key.code {
+                        KeyCode::Esc => {
+                            viewer.search_active = false;
+                            viewer.search_query.clear();
+                            viewer.scroll_offset = 0;
+                            viewer.selected = 0;
+                        }
+                        KeyCode::Enter => {
+                            viewer.search_active = false;
+                        }
+                        KeyCode::Backspace => {
+                            viewer.search_query.pop();
+                            viewer.scroll_offset = 0;
+                            viewer.selected = 0;
+                        }
+                        KeyCode::Char(c) => {
+                            viewer.search_query.push(c);
+                            viewer.scroll_offset = 0;
+                            viewer.selected = 0;
+                        }
+                        _ => {}
+                    }
+                } else if viewer.is_detail_open() {
                     match key.code {
                         KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => viewer.close_detail(),
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -213,7 +244,19 @@ pub fn run_log_viewer(path: &Path) -> anyhow::Result<()> {
                     }
                 } else {
                     match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => viewer.should_quit = true,
+                        KeyCode::Char('q') => viewer.should_quit = true,
+                        KeyCode::Esc => {
+                            if !viewer.search_query.is_empty() {
+                                viewer.search_query.clear();
+                                viewer.scroll_offset = 0;
+                                viewer.selected = 0;
+                            } else {
+                                viewer.should_quit = true;
+                            }
+                        }
+                        KeyCode::Char('/') => {
+                            viewer.search_active = true;
+                        }
                         KeyCode::Tab => viewer.cycle_filter(),
                         KeyCode::Up | KeyCode::Char('k') => viewer.scroll_up(),
                         KeyCode::Down | KeyCode::Char('j') => viewer.scroll_down(table_height),
@@ -287,6 +330,34 @@ fn handle_input(
 ) -> anyhow::Result<bool> {
     match event::read()? {
         Event::Key(key) if key.kind == KeyEventKind::Press => {
+            // Search mode: capture keystrokes for the search query
+            if app.search_active {
+                match key.code {
+                    KeyCode::Esc => {
+                        app.search_active = false;
+                        app.search_query.clear();
+                        app.scroll_offset = 0;
+                        app.selected = 0;
+                    }
+                    KeyCode::Enter => {
+                        app.search_active = false;
+                        // Keep query active, just exit input mode
+                    }
+                    KeyCode::Backspace => {
+                        app.search_query.pop();
+                        app.scroll_offset = 0;
+                        app.selected = 0;
+                    }
+                    KeyCode::Char(c) => {
+                        app.search_query.push(c);
+                        app.scroll_offset = 0;
+                        app.selected = 0;
+                    }
+                    _ => {}
+                }
+                return Ok(false);
+            }
+
             if app.is_detail_open() {
                 match key.code {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.close_detail(),
@@ -296,11 +367,48 @@ fn handle_input(
                     KeyCode::Down | KeyCode::Char('j') => {
                         app.detail_scroll += 1;
                     }
+                    KeyCode::Char('r') => {
+                        // Replay the selected request as-is
+                        if let Some(idx) = app.detail_index {
+                            let maybe_entry: Option<AuditEntry> = app.filtered_events().get(idx).copied().cloned();
+                            if let Some(ref entry) = maybe_entry {
+                                let cfg_ref = config;
+                                let method = entry.method.clone();
+                                let url = entry.url.clone();
+                                let headers = entry.headers.clone();
+                                let body = entry.body.clone();
+                                app.status_message = Some(("Replaying...".into(), std::time::Instant::now()));
+                                spawn_replay(cfg_ref, method, url, headers, body);
+                            }
+                        }
+                    }
+                    KeyCode::Char('R') => {
+                        // Edit & replay
+                        if let Some(idx) = app.detail_index {
+                            let maybe_entry: Option<AuditEntry> = app.filtered_events().get(idx).copied().cloned();
+                            if let Some(entry) = maybe_entry {
+                                app.replay_editor = Some(ReplayEditor::from_entry(&entry));
+                                app.screen = Screen::ReplayEdit;
+                            }
+                        }
+                    }
                     _ => {}
                 }
             } else {
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                    KeyCode::Char('q') => app.should_quit = true,
+                    KeyCode::Esc => {
+                        if !app.search_query.is_empty() {
+                            app.search_query.clear();
+                            app.scroll_offset = 0;
+                            app.selected = 0;
+                        } else {
+                            app.should_quit = true;
+                        }
+                    }
+                    KeyCode::Char('/') => {
+                        app.search_active = true;
+                    }
                     KeyCode::Char('c') => {
                         if config.is_some() {
                             switch_to_config(app, config);
@@ -321,6 +429,27 @@ fn handle_input(
                         app.scroll_offset = max.saturating_sub(table_height.saturating_sub(1));
                     }
                     KeyCode::Enter => app.toggle_detail(),
+                    KeyCode::Char('r') => {
+                        // Replay selected request from list
+                        let maybe_entry: Option<AuditEntry> = app.filtered_events().get(app.selected).copied().cloned();
+                        if let Some(ref entry) = maybe_entry {
+                            let cfg_ref = config;
+                            let method = entry.method.clone();
+                            let url = entry.url.clone();
+                            let headers = entry.headers.clone();
+                            let body = entry.body.clone();
+                            app.status_message = Some(("Replaying...".into(), std::time::Instant::now()));
+                            spawn_replay(cfg_ref, method, url, headers, body);
+                        }
+                    }
+                    KeyCode::Char('R') => {
+                        // Edit & replay selected request
+                        let maybe_entry: Option<AuditEntry> = app.filtered_events().get(app.selected).copied().cloned();
+                        if let Some(entry) = maybe_entry {
+                            app.replay_editor = Some(ReplayEditor::from_entry(&entry));
+                            app.screen = Screen::ReplayEdit;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -347,6 +476,158 @@ fn handle_input(
         _ => {}
     }
     Ok(app.should_quit)
+}
+
+/// Handle input on the replay edit screen.
+fn handle_replay_edit_input(
+    app: &mut App,
+    config: Option<&Arc<RuntimeConfig>>,
+) -> anyhow::Result<bool> {
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            let Some(ref mut editor) = app.replay_editor else {
+                app.screen = Screen::Live;
+                return Ok(false);
+            };
+
+            match key.code {
+                KeyCode::Esc => {
+                    app.replay_editor = None;
+                    app.screen = Screen::Live;
+                }
+                KeyCode::Tab => {
+                    editor.focus = (editor.focus + 1) % 3;
+                }
+                KeyCode::BackTab => {
+                    editor.focus = if editor.focus == 0 { 2 } else { editor.focus - 1 };
+                }
+                KeyCode::Enter => {
+                    // Send the edited request
+                    let method = editor.method.clone();
+                    let url = editor.url.clone();
+                    let headers = editor.headers.clone();
+                    let body = if editor.body.is_empty() { None } else { Some(editor.body.clone()) };
+                    app.status_message = Some(("Replaying...".into(), std::time::Instant::now()));
+                    spawn_replay(config, method, url, headers, body);
+                    app.replay_editor = None;
+                    app.screen = Screen::Live;
+                }
+                KeyCode::Backspace => {
+                    editor.focused_value_mut().pop();
+                }
+                KeyCode::Char(c) => {
+                    if editor.focus == 0 {
+                        // Method field: cycle through methods on any key
+                        editor.cycle_method();
+                    } else {
+                        editor.focused_value_mut().push(c);
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(app.should_quit)
+}
+
+/// Spawn a background task to replay a request.
+fn spawn_replay(
+    config: Option<&Arc<RuntimeConfig>>,
+    method: String,
+    url_str: String,
+    headers: std::collections::HashMap<String, String>,
+    body: Option<String>,
+) {
+    let Some(cfg) = config else { return };
+    let cfg = cfg.clone();
+
+    tokio::spawn(async move {
+        let engine = cfg.engine();
+
+        let parsed_url = match url::Url::parse(&url_str) {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+        let host = parsed_url.host_str().unwrap_or("unknown").to_string();
+        let port = parsed_url.port().unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
+        let path = parsed_url.path().to_string();
+        let content_type = headers.get("content-type").cloned();
+        let body_bytes = body.as_ref().map(|b| bytes::Bytes::from(b.clone()));
+
+        let ctx = aegis_core::analyzer::RequestContext {
+            method: method.clone(),
+            url: parsed_url.clone(),
+            host: host.clone(),
+            port,
+            path,
+            headers: headers.clone(),
+            body: body_bytes.clone(),
+            content_type: content_type.clone(),
+        };
+
+        let verdict = engine.evaluate_http(&ctx).await;
+
+        let mut audit_entry = aegis_core::audit::AuditEntry::with_request(
+            verdict.decision,
+            verdict.reason.clone(),
+            verdict.source.clone(),
+            method,
+            url_str,
+            host,
+            aegis_core::audit::Layer::Proxy,
+            headers,
+            body_bytes.as_deref(),
+            content_type,
+        );
+
+        // If allowed, make the actual request
+        if verdict.decision == aegis_core::decision::Decision::Allow {
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_default();
+
+            let method = match ctx.method.to_uppercase().as_str() {
+                "GET" => reqwest::Method::GET,
+                "POST" => reqwest::Method::POST,
+                "PUT" => reqwest::Method::PUT,
+                "PATCH" => reqwest::Method::PATCH,
+                "DELETE" => reqwest::Method::DELETE,
+                "HEAD" => reqwest::Method::HEAD,
+                "OPTIONS" => reqwest::Method::OPTIONS,
+                _ => reqwest::Method::GET,
+            };
+
+            let mut request = client.request(method, parsed_url.as_str());
+            for (k, v) in &ctx.headers {
+                if k.to_lowercase() != "host" && k.to_lowercase() != "proxy-connection" {
+                    request = request.header(k.as_str(), v.as_str());
+                }
+            }
+            if let Some(ref b) = ctx.body {
+                request = request.body(b.to_vec());
+            }
+
+            if let Ok(resp) = request.send().await {
+                let status = resp.status().as_u16();
+                let resp_ct = resp.headers().get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let mut resp_headers = std::collections::HashMap::new();
+                for (k, v) in resp.headers() {
+                    if let Ok(val) = v.to_str() {
+                        resp_headers.insert(k.to_string(), val.to_string());
+                    }
+                }
+                let resp_body = resp.bytes().await.ok();
+                audit_entry.set_response(status, resp_headers, resp_body.as_deref(), resp_ct.as_deref());
+            }
+        }
+
+        cfg.audit().log(&audit_entry);
+    });
 }
 
 /// Handle keyboard input on the config screen. Returns true if the app should quit.

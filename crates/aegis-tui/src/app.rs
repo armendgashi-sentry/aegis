@@ -10,6 +10,65 @@ use aegis_core::policy::yaml_policy::YamlPolicy;
 pub enum Screen {
     Live,
     Config,
+    ReplayEdit,
+}
+
+/// Editable fields for replay.
+pub struct ReplayEditor {
+    /// 0=method, 1=url, 2=body
+    pub focus: usize,
+    pub method: String,
+    pub url: String,
+    pub body: String,
+    pub headers: std::collections::HashMap<String, String>,
+}
+
+impl ReplayEditor {
+    pub fn from_entry(entry: &AuditEntry) -> Self {
+        Self {
+            focus: 1, // start on URL
+            method: entry.method.clone(),
+            url: entry.url.clone(),
+            body: entry.body.clone().unwrap_or_default(),
+            headers: entry.headers.clone(),
+        }
+    }
+
+    pub fn focused_label(&self) -> &str {
+        match self.focus {
+            0 => "METHOD",
+            1 => "URL",
+            2 => "BODY",
+            _ => "",
+        }
+    }
+
+    pub fn focused_value(&self) -> &str {
+        match self.focus {
+            0 => &self.method,
+            1 => &self.url,
+            2 => &self.body,
+            _ => "",
+        }
+    }
+
+    pub fn focused_value_mut(&mut self) -> &mut String {
+        match self.focus {
+            0 => &mut self.method,
+            1 => &mut self.url,
+            2 => &mut self.body,
+            _ => &mut self.url,
+        }
+    }
+
+    pub fn cycle_method(&mut self) {
+        const METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+        if let Some(idx) = METHODS.iter().position(|m| *m == self.method) {
+            self.method = METHODS[(idx + 1) % METHODS.len()].to_string();
+        } else {
+            self.method = "GET".to_string();
+        }
+    }
 }
 
 /// State for the config screen.
@@ -99,6 +158,13 @@ pub struct App {
     pub screen: Screen,
     /// Config screen state
     pub config_state: ConfigState,
+    /// Search mode
+    pub search_active: bool,
+    pub search_query: String,
+    /// Status message (e.g., "Replaying...", "Replay complete")
+    pub status_message: Option<(String, Instant)>,
+    /// Replay editor state (populated when user presses R)
+    pub replay_editor: Option<ReplayEditor>,
 }
 
 impl App {
@@ -119,6 +185,10 @@ impl App {
             rps: 0,
             screen: Screen::Live,
             config_state: ConfigState::new(),
+            search_active: false,
+            search_query: String::new(),
+            status_message: None,
+            replay_editor: None,
         }
     }
 
@@ -145,7 +215,32 @@ impl App {
     }
 
     pub fn filtered_events(&self) -> Vec<&AuditEntry> {
-        self.events.iter().filter(|e| self.filter.matches(e)).collect()
+        let query = self.search_query.to_lowercase();
+        let has_search = !query.is_empty();
+        self.events
+            .iter()
+            .filter(|e| self.filter.matches(e))
+            .filter(|e| {
+                if has_search {
+                    e.url.to_lowercase().contains(&query)
+                        || e.method.to_lowercase().contains(&query)
+                        || e.reason.to_lowercase().contains(&query)
+                        || e.source.to_lowercase().contains(&query)
+                        || e.host.to_lowercase().contains(&query)
+                } else {
+                    true
+                }
+            })
+            .collect()
+    }
+
+    /// Clear expired status messages (after 3 seconds).
+    pub fn clear_expired_status(&mut self) {
+        if let Some((_, when)) = &self.status_message {
+            if when.elapsed() > std::time::Duration::from_secs(3) {
+                self.status_message = None;
+            }
+        }
     }
 
     pub fn cycle_filter(&mut self) {
@@ -220,6 +315,8 @@ pub struct LogViewer {
     pub selected: usize,
     pub detail_index: Option<usize>,
     pub detail_scroll: usize,
+    pub search_active: bool,
+    pub search_query: String,
 }
 
 impl LogViewer {
@@ -233,6 +330,8 @@ impl LogViewer {
             selected: 0,
             detail_index: None,
             detail_scroll: 0,
+            search_active: false,
+            search_query: String::new(),
         }
     }
 
@@ -249,7 +348,23 @@ impl LogViewer {
     }
 
     pub fn filtered_entries(&self) -> Vec<&AuditEntry> {
-        self.entries.iter().filter(|e| self.filter.matches(e)).collect()
+        let query = self.search_query.to_lowercase();
+        let has_search = !query.is_empty();
+        self.entries
+            .iter()
+            .filter(|e| self.filter.matches(e))
+            .filter(|e| {
+                if has_search {
+                    e.url.to_lowercase().contains(&query)
+                        || e.method.to_lowercase().contains(&query)
+                        || e.reason.to_lowercase().contains(&query)
+                        || e.source.to_lowercase().contains(&query)
+                        || e.host.to_lowercase().contains(&query)
+                } else {
+                    true
+                }
+            })
+            .collect()
     }
 
     pub fn cycle_filter(&mut self) {

@@ -14,3 +14,6 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 futures-util = "0.3"
+reqwest = { workspace = true }
+url = { workspace = true }
+bytes = { workspace = true }
