@@ -1,15 +1,16 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
 
 use aegis_core::audit::AuditLogger;
-use aegis_core::policy::PolicyEngine;
-use aegis_core::secrets::SecretsConfig;
+use aegis_core::runtime::RuntimeConfig;
+use aegis_proxy::rate_limiter::ProxyRateLimiter;
 
+use crate::config_routes;
 use crate::routes;
 use crate::state::AppState;
 
@@ -17,11 +18,11 @@ use crate::state::AppState;
 pub async fn start_web_server(
     listen_addr: SocketAddr,
     audit: AuditLogger,
-    engine: Arc<PolicyEngine>,
-    secrets: Option<Arc<SecretsConfig>>,
+    config: Arc<RuntimeConfig>,
+    rate_limiter: Option<Arc<RwLock<ProxyRateLimiter>>>,
     static_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let state = Arc::new(AppState::new(audit, engine, secrets));
+    let state = Arc::new(AppState::new(audit, config, rate_limiter));
 
     let mut app = Router::new()
         .route("/api/health", get(routes::health))
@@ -37,6 +38,15 @@ pub async fn start_web_server(
         .route("/api/snapshot/{id}/diff", get(routes::snapshot_diff))
         .route("/api/snapshot/{id}/rollback", post(routes::snapshot_rollback))
         .route("/api/snapshot/{id}/commit", post(routes::snapshot_commit))
+        // Config management endpoints
+        .route("/api/config", get(config_routes::get_config))
+        .route("/api/config/presets", get(config_routes::list_presets))
+        .route("/api/config/presets/apply", post(config_routes::apply_preset))
+        .route("/api/config/policy", get(config_routes::get_policy).put(config_routes::update_policy))
+        .route("/api/config/rate-limit", put(config_routes::update_rate_limit))
+        .route("/api/config/secrets", get(config_routes::get_secrets).post(config_routes::add_secret))
+        .route("/api/config/secrets/{name}", delete(config_routes::remove_secret))
+        .route("/api/config/reload", post(config_routes::reload_config))
         .with_state(state);
 
     // Serve the SPA static files if a directory is provided

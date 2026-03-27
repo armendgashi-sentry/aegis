@@ -1,9 +1,11 @@
 pub mod app;
+pub mod config_ui;
 pub mod theme;
 pub mod ui;
 
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{
@@ -19,11 +21,15 @@ use ratatui::Terminal;
 use tokio::sync::broadcast;
 
 use aegis_core::audit::{self, AuditEntry};
+use aegis_core::runtime::RuntimeConfig;
 
-use app::{App, LogViewer};
+use app::{App, LogViewer, Screen};
 
 /// Run the live TUI dashboard, subscribing to broadcast events.
-pub async fn run_live(mut rx: broadcast::Receiver<AuditEntry>) -> anyhow::Result<()> {
+pub async fn run_live(
+    mut rx: broadcast::Receiver<AuditEntry>,
+    config: Option<Arc<RuntimeConfig>>,
+) -> anyhow::Result<()> {
     enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
     io::stdout().execute(EnableMouseCapture)?;
@@ -36,11 +42,23 @@ pub async fn run_live(mut rx: broadcast::Receiver<AuditEntry>) -> anyhow::Result
     loop {
         let table_height = calc_table_height(&terminal, &app)?;
 
-        terminal.draw(|f| ui::draw_live(f, &app))?;
+        terminal.draw(|f| match app.screen {
+            Screen::Live => ui::draw_live(f, &app),
+            Screen::Config => config_ui::draw_config(f, &app),
+        })?;
 
         if crossterm::event::poll(Duration::from_millis(50))? {
-            if handle_input(&mut app, table_height)? {
-                break;
+            match app.screen {
+                Screen::Live => {
+                    if handle_input(&mut app, table_height, config.as_ref())? {
+                        break;
+                    }
+                }
+                Screen::Config => {
+                    if handle_config_input(&mut app, config.as_ref())? {
+                        break;
+                    }
+                }
             }
         }
 
@@ -90,7 +108,8 @@ pub async fn run_watch(ws_url: &str) -> anyhow::Result<()> {
         terminal.draw(|f| ui::draw_live(f, &app))?;
 
         if crossterm::event::poll(Duration::from_millis(50))? {
-            if handle_input(&mut app, table_height)? {
+            // Watch mode has no RuntimeConfig (remote viewer)
+            if handle_input(&mut app, table_height, None)? {
                 break;
             }
         }
@@ -260,8 +279,12 @@ fn calc_table_height(
     })
 }
 
-/// Handle keyboard and mouse input. Returns true if the app should quit.
-fn handle_input(app: &mut App, table_height: usize) -> anyhow::Result<bool> {
+/// Handle keyboard and mouse input on the live screen. Returns true if the app should quit.
+fn handle_input(
+    app: &mut App,
+    table_height: usize,
+    config: Option<&Arc<RuntimeConfig>>,
+) -> anyhow::Result<bool> {
     match event::read()? {
         Event::Key(key) if key.kind == KeyEventKind::Press => {
             if app.is_detail_open() {
@@ -278,6 +301,11 @@ fn handle_input(app: &mut App, table_height: usize) -> anyhow::Result<bool> {
             } else {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                    KeyCode::Char('c') => {
+                        if config.is_some() {
+                            switch_to_config(app, config);
+                        }
+                    }
                     KeyCode::Tab => app.cycle_filter(),
                     KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
                     KeyCode::Down | KeyCode::Char('j') => app.scroll_down(table_height),
@@ -319,6 +347,130 @@ fn handle_input(app: &mut App, table_height: usize) -> anyhow::Result<bool> {
         _ => {}
     }
     Ok(app.should_quit)
+}
+
+/// Handle keyboard input on the config screen. Returns true if the app should quit.
+fn handle_config_input(
+    app: &mut App,
+    config: Option<&Arc<RuntimeConfig>>,
+) -> anyhow::Result<bool> {
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                KeyCode::Char('c') => {
+                    app.screen = Screen::Live;
+                    app.config_state.status_message = None;
+                }
+                KeyCode::Tab => {
+                    app.config_state.focus = (app.config_state.focus + 1) % 2;
+                    app.config_state.scroll = 0;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if app.config_state.focus == 0 {
+                        // Preset list
+                        if app.config_state.selected_preset > 0 {
+                            app.config_state.selected_preset -= 1;
+                        }
+                    } else {
+                        // Policy scroll
+                        app.config_state.scroll = app.config_state.scroll.saturating_sub(1);
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if app.config_state.focus == 0 {
+                        let max = app.config_state.preset_names.len().saturating_sub(1);
+                        if app.config_state.selected_preset < max {
+                            app.config_state.selected_preset += 1;
+                        }
+                    } else {
+                        app.config_state.scroll += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    if app.config_state.focus == 0 {
+                        apply_selected_preset(app, config);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Event::Mouse(mouse) => {
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    if app.config_state.focus == 1 {
+                        app.config_state.scroll = app.config_state.scroll.saturating_sub(1);
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if app.config_state.focus == 1 {
+                        app.config_state.scroll += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(app.should_quit)
+}
+
+/// Load config state and switch to the config screen.
+fn switch_to_config(app: &mut App, config: Option<&Arc<RuntimeConfig>>) {
+    if let Some(cfg) = config {
+        let cs = &mut app.config_state;
+        cs.preset_names = cfg.list_presets();
+        cs.active_preset = cfg.active_preset();
+        cs.policy = Some(cfg.policy_snapshot());
+
+        // Set selected to the active preset if found
+        if let Some(ref active) = cs.active_preset {
+            cs.selected_preset = cs.preset_names.iter()
+                .position(|p| p == active)
+                .unwrap_or(0);
+        }
+
+        // Secrets info
+        if let Some(s) = cfg.secrets() {
+            cs.secrets_count = s.secrets.len();
+            cs.strip_env_count = s.strip_env.len();
+        } else {
+            cs.secrets_count = 0;
+            cs.strip_env_count = 0;
+        }
+
+        cs.scroll = 0;
+        cs.focus = 0;
+        cs.status_message = None;
+    }
+    app.screen = Screen::Config;
+}
+
+/// Apply the currently selected preset.
+fn apply_selected_preset(app: &mut App, config: Option<&Arc<RuntimeConfig>>) {
+    let Some(cfg) = config else {
+        app.config_state.status_message = Some("No RuntimeConfig available".into());
+        return;
+    };
+
+    let cs = &app.config_state;
+    let Some(preset_name) = cs.preset_names.get(cs.selected_preset) else {
+        return;
+    };
+    let preset_name = preset_name.clone();
+
+    match cfg.apply_preset(&preset_name) {
+        Ok(_rl) => {
+            // Note: rate limiter rebuild is not handled from TUI since we don't have the handle.
+            // The web API / proxy will pick up the new engine on next request.
+            app.config_state.active_preset = Some(preset_name.clone());
+            app.config_state.policy = Some(cfg.policy_snapshot());
+            app.config_state.status_message = Some(format!("Applied preset: {preset_name}"));
+        }
+        Err(e) => {
+            app.config_state.status_message = Some(format!("Error: {e}"));
+        }
+    }
 }
 
 fn cleanup_terminal() -> anyhow::Result<()> {

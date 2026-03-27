@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 aegis-core = { workspace = true }
+aegis-proxy = { workspace = true }
 aegis-sandbox = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }

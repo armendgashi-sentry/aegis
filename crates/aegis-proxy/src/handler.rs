@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use url::Url;
@@ -8,51 +8,60 @@ use url::Url;
 use aegis_core::analyzer::RequestContext;
 use aegis_core::audit::{mask_secret_value, AuditEntry, AuditLogger, Layer, SecretApplied};
 use aegis_core::decision::{Decision, Verdict};
-use aegis_core::policy::PolicyEngine;
-use aegis_core::secrets::SecretsConfig;
+use aegis_core::policy::yaml_policy::RateLimitPolicy;
+use aegis_core::runtime::RuntimeConfig;
 
 use crate::rate_limiter::ProxyRateLimiter;
 
 /// The proxy handler: receives parsed requests and runs them through the policy engine.
 pub struct ProxyHandler {
-    pub engine: Arc<PolicyEngine>,
-    pub rate_limiter: ProxyRateLimiter,
+    pub config: Arc<RuntimeConfig>,
+    pub rate_limiter: Arc<RwLock<ProxyRateLimiter>>,
     audit: AuditLogger,
     /// Addresses that bypass the policy engine (e.g., guard server, web UI).
     bypass: HashSet<String>,
-    /// Secret injection rules (inject headers on outbound requests).
-    secrets: Option<Arc<SecretsConfig>>,
 }
 
 impl ProxyHandler {
-    pub fn new(engine: Arc<PolicyEngine>, rate_limiter: ProxyRateLimiter, audit: AuditLogger) -> Self {
+    pub fn new(
+        config: Arc<RuntimeConfig>,
+        rate_limiter: ProxyRateLimiter,
+        audit: AuditLogger,
+    ) -> Self {
         Self {
-            engine,
-            rate_limiter,
+            config,
+            rate_limiter: Arc::new(RwLock::new(rate_limiter)),
             audit,
             bypass: HashSet::new(),
-            secrets: None,
         }
     }
 
     /// Add addresses that should bypass policy evaluation (e.g., "127.0.0.1:19001").
-    /// Requests to these addresses are forwarded without inspection.
     pub fn with_bypass(mut self, addrs: Vec<String>) -> Self {
         self.bypass = addrs.into_iter().collect();
         self
     }
 
-    /// Set secret injection rules.
-    pub fn with_secrets(mut self, secrets: Arc<SecretsConfig>) -> Self {
-        self.secrets = Some(secrets);
-        self
+    /// Get a handle to the shared rate limiter (for web API to rebuild on config change).
+    pub fn rate_limiter_handle(&self) -> Arc<RwLock<ProxyRateLimiter>> {
+        self.rate_limiter.clone()
+    }
+
+    /// Rebuild the rate limiter with new policy values.
+    pub fn rebuild_rate_limiter(&self, rl: &RateLimitPolicy) {
+        let new = ProxyRateLimiter::new(rl.requests_per_second, rl.burst, rl.per_target);
+        *self.rate_limiter.write().unwrap() = new;
+        tracing::info!(
+            "Rate limiter rebuilt: {} rps, burst {}, per_target={}",
+            rl.requests_per_second, rl.burst, rl.per_target,
+        );
     }
 
     /// Inject secret headers into a request's headers if a matching rule exists.
     /// Returns metadata about injected secrets (with masked values) for audit logging.
     pub fn inject_secrets(&self, host: &str, path: &str, headers: &mut HashMap<String, String>) -> Vec<SecretApplied> {
         let mut applied = Vec::new();
-        if let Some(ref secrets) = self.secrets {
+        if let Some(secrets) = self.config.secrets() {
             if let Some(rule) = secrets.find_match(host, path) {
                 headers.insert(
                     rule.inject_header.to_lowercase(),
@@ -72,7 +81,7 @@ impl ProxyHandler {
     /// Check what secrets WOULD be applied (for audit metadata) without modifying headers.
     pub fn check_secrets_metadata(&self, host: &str, path: &str) -> Vec<SecretApplied> {
         let mut applied = Vec::new();
-        if let Some(ref secrets) = self.secrets {
+        if let Some(secrets) = self.config.secrets() {
             if let Some(rule) = secrets.find_match(host, path) {
                 applied.push(SecretApplied {
                     rule_name: rule.name.clone(),
@@ -125,25 +134,28 @@ impl ProxyHandler {
             return Verdict::allow("bypass:aegis-internal");
         }
 
-        // Rate limit check
-        if !self.rate_limiter.check(&host) {
-            let verdict = Verdict::deny(
-                format!("Rate limit exceeded for target: {host}"),
-                "builtin:rate_limit",
-            );
-            self.audit.log(&AuditEntry::with_request(
-                verdict.decision,
-                verdict.reason.clone(),
-                verdict.source.clone(),
-                method.to_string(),
-                uri.to_string(),
-                host.clone(),
-                Layer::Proxy,
-                headers.clone(),
-                body.as_deref(),
-                content_type.clone(),
-            ));
-            return verdict;
+        // Rate limit check (read lock on rate limiter)
+        {
+            let rl = self.rate_limiter.read().unwrap();
+            if !rl.check(&host) {
+                let verdict = Verdict::deny(
+                    format!("Rate limit exceeded for target: {host}"),
+                    "builtin:rate_limit",
+                );
+                self.audit.log(&AuditEntry::with_request(
+                    verdict.decision,
+                    verdict.reason.clone(),
+                    verdict.source.clone(),
+                    method.to_string(),
+                    uri.to_string(),
+                    host.clone(),
+                    Layer::Proxy,
+                    headers.clone(),
+                    body.as_deref(),
+                    content_type.clone(),
+                ));
+                return verdict;
+            }
         }
 
         let ctx = RequestContext {
@@ -157,7 +169,9 @@ impl ProxyHandler {
             content_type: content_type.clone(),
         };
 
-        let verdict = self.engine.evaluate_http(&ctx).await;
+        // Get current engine (Arc clone, nanosecond lock hold)
+        let engine = self.config.engine();
+        let verdict = engine.evaluate_http(&ctx).await;
 
         // Engine logs Deny decisions internally. For Allow decisions,
         // we log here with secrets_applied metadata.

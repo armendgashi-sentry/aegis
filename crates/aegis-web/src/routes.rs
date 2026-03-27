@@ -163,7 +163,8 @@ pub async fn evaluate_shell(
         cwd: req.cwd,
     };
 
-    let verdict = state.engine.evaluate_shell(&ctx);
+    let engine = state.config.engine();
+    let verdict = engine.evaluate_shell(&ctx);
 
     Json(serde_json::json!({
         "decision": format!("{:?}", verdict.decision).to_lowercase(),
@@ -219,7 +220,8 @@ pub async fn evaluate_http(
         content_type,
     };
 
-    let verdict = state.engine.evaluate_http(&ctx).await;
+    let engine = state.config.engine();
+    let verdict = engine.evaluate_http(&ctx).await;
 
     Json(serde_json::json!({
         "decision": format!("{:?}", verdict.decision).to_lowercase(),
@@ -232,7 +234,7 @@ pub async fn evaluate_http(
 pub async fn secrets_status(
     State(state): State<Arc<AppState>>,
 ) -> Json<serde_json::Value> {
-    match &state.secrets {
+    match state.config.secrets() {
         Some(secrets) => {
             let summary = secrets.status_summary();
             Json(serde_json::json!({

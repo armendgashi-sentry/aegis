@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use tokio::sync::Mutex;
 
 use aegis_core::audit::AuditLogger;
-use aegis_core::policy::PolicyEngine;
-use aegis_core::secrets::SecretsConfig;
+use aegis_core::runtime::RuntimeConfig;
+use aegis_proxy::rate_limiter::ProxyRateLimiter;
 use aegis_sandbox::snapshot::{self, SnapshotBackend, SnapshotInfo};
 use serde::Serialize;
 
@@ -15,8 +15,8 @@ pub struct AppState {
     pub audit: AuditLogger,
     pub stats: Stats,
     pub audit_dir: Option<String>,
-    pub engine: Arc<PolicyEngine>,
-    pub secrets: Option<Arc<SecretsConfig>>,
+    pub config: Arc<RuntimeConfig>,
+    pub rate_limiter: Option<Arc<RwLock<ProxyRateLimiter>>>,
     pub snapshots: Arc<Mutex<HashMap<String, SnapshotInfo>>>,
     pub snapshot_backend: Arc<dyn SnapshotBackend>,
 }
@@ -24,10 +24,9 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         audit: AuditLogger,
-        engine: Arc<PolicyEngine>,
-        secrets: Option<Arc<SecretsConfig>>,
+        config: Arc<RuntimeConfig>,
+        rate_limiter: Option<Arc<RwLock<ProxyRateLimiter>>>,
     ) -> Self {
-        // Derive the directory from the log path, default to session log dir
         let audit_dir = audit
             .log_path()
             .and_then(|p| {
@@ -41,8 +40,8 @@ impl AppState {
             audit,
             stats: Stats::new(),
             audit_dir,
-            engine,
-            secrets,
+            config,
+            rate_limiter,
             snapshots: Arc::new(Mutex::new(HashMap::new())),
             snapshot_backend: Arc::from(snapshot::detect_backend()),
         }

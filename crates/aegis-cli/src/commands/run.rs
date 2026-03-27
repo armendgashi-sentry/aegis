@@ -7,7 +7,7 @@ use clap::Args;
 
 use aegis_core::audit::AuditLogger;
 use aegis_core::config::AegisConfig;
-use aegis_core::policy::PolicyEngine;
+use aegis_core::runtime::RuntimeConfig;
 use aegis_proxy::handler::ProxyHandler;
 use aegis_proxy::proxy::AegisProxy;
 use aegis_proxy::rate_limiter::ProxyRateLimiter;
@@ -101,43 +101,43 @@ pub async fn execute(args: RunArgs) -> anyhow::Result<()> {
     tracing::info!("Audit log: {}", audit_path.display());
     let audit = AuditLogger::new(Some(audit_path.to_string_lossy().to_string()));
 
-    let engine = Arc::new(PolicyEngine::from_policies(
-        &policies_dir,
-        &middlewares_dir,
+    // Create hot-reloadable runtime config
+    let runtime_config = Arc::new(RuntimeConfig::new(
+        policies_dir.clone(),
+        middlewares_dir.clone(),
         audit.clone(),
+        args.preset.clone(),
     )?);
 
     // Load secrets config
-    let secrets = {
-        let secrets_path = args
-            .secrets
-            .clone()
-            .or_else(|| config.secrets_file.as_ref().map(|s| AegisConfig::expand_path(s)));
+    let secrets_path = args
+        .secrets
+        .clone()
+        .or_else(|| config.secrets_file.as_ref().map(|s| AegisConfig::expand_path(s)));
 
-        match secrets_path {
-            Some(path) if path.exists() => {
-                match aegis_core::secrets::SecretsConfig::load(&path) {
-                    Ok(s) => {
-                        tracing::info!(
-                            "Loaded {} secret rules, stripping {} env vars",
-                            s.secrets.len(),
-                            s.strip_env.len()
-                        );
-                        Some(Arc::new(s))
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to load secrets: {}", e);
-                        None
-                    }
+    if let Some(ref path) = secrets_path {
+        if path.exists() {
+            match aegis_core::secrets::SecretsConfig::load(path) {
+                Ok(s) => {
+                    tracing::info!(
+                        "Loaded {} secret rules, stripping {} env vars",
+                        s.secrets.len(),
+                        s.strip_env.len()
+                    );
+                    runtime_config.set_secrets(s);
+                    runtime_config.set_secrets_path(path.clone());
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load secrets: {}", e);
                 }
             }
-            Some(path) => {
-                tracing::debug!("Secrets file not found: {}", path.display());
-                None
-            }
-            None => None,
+        } else {
+            tracing::debug!("Secrets file not found: {}", path.display());
         }
-    };
+    }
+
+    // Keep a reference to secrets for strip_env during agent spawn
+    let secrets = runtime_config.secrets();
 
     let mut tasks = Vec::new();
 
@@ -166,12 +166,13 @@ pub async fn execute(args: RunArgs) -> anyhow::Result<()> {
     };
 
     // Start proxy
-    if !args.guard_only {
+    let rate_limiter_handle = if !args.guard_only {
         let proxy_addr: SocketAddr = config.proxy.listen.parse()?;
-        let rate_limiter = ProxyRateLimiter::new(10, 50, true);
+        let rl = runtime_config.rate_limit();
+        tracing::info!("Rate limit: {} rps, burst {}, per_target={}", rl.requests_per_second, rl.burst, rl.per_target);
+        let rate_limiter = ProxyRateLimiter::new(rl.requests_per_second, rl.burst, rl.per_target);
 
         // Build bypass list: Aegis's own services must not be policy-checked
-        // (agent hook calls to the guard would otherwise be blocked as out-of-scope)
         let mut bypass_addrs = Vec::new();
         if !args.proxy_only {
             bypass_addrs.push(config.guard.listen.clone());
@@ -180,10 +181,9 @@ pub async fn execute(args: RunArgs) -> anyhow::Result<()> {
             bypass_addrs.push(config.web.listen.clone());
         }
 
-        let mut handler = ProxyHandler::new(engine.clone(), rate_limiter, audit.clone()).with_bypass(bypass_addrs);
-        if let Some(ref s) = secrets {
-            handler = handler.with_secrets(s.clone());
-        }
+        let handler = ProxyHandler::new(runtime_config.clone(), rate_limiter, audit.clone())
+            .with_bypass(bypass_addrs);
+        let rl_handle = handler.rate_limiter_handle();
         let handler = Arc::new(handler);
         let mut proxy = AegisProxy::new(handler, proxy_addr);
 
@@ -196,16 +196,19 @@ pub async fn execute(args: RunArgs) -> anyhow::Result<()> {
                 tracing::error!("Proxy error: {}", e);
             }
         }));
-    }
+        Some(rl_handle)
+    } else {
+        None
+    };
 
     // Start guard
     if !args.proxy_only {
         let guard_addr: SocketAddr = config.guard.listen.parse()?;
-        let guard_engine = engine.clone();
+        let guard_config = runtime_config.clone();
 
         tasks.push(tokio::spawn(async move {
             if let Err(e) =
-                aegis_guard::server::start_guard_server(guard_addr, guard_engine).await
+                aegis_guard::server::start_guard_server(guard_addr, guard_config).await
             {
                 tracing::error!("Guard error: {}", e);
             }
@@ -217,12 +220,12 @@ pub async fn execute(args: RunArgs) -> anyhow::Result<()> {
     if start_web {
         let web_addr: SocketAddr = config.web.listen.parse()?;
         let web_audit = audit.clone();
-        let web_engine = engine.clone();
-        let web_secrets = secrets.clone();
+        let web_config = runtime_config.clone();
+        let web_rl = rate_limiter_handle.clone();
         let static_dir = Some(PathBuf::from(&config.web.static_dir));
         tasks.push(tokio::spawn(async move {
             if let Err(e) =
-                aegis_web::server::start_web_server(web_addr, web_audit, web_engine, web_secrets, static_dir).await
+                aegis_web::server::start_web_server(web_addr, web_audit, web_config, web_rl, static_dir).await
             {
                 tracing::error!("Web API error: {}", e);
             }
@@ -350,7 +353,7 @@ pub async fn execute(args: RunArgs) -> anyhow::Result<()> {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Run TUI (blocks until user quits)
-        aegis_tui::run_live(rx).await?;
+        aegis_tui::run_live(rx, Some(runtime_config.clone())).await?;
         tracing::info!("TUI closed. Shutting down Aegis.");
         return Ok(());
     }
@@ -418,14 +421,15 @@ async fn spawn_agent(
     let proxy_url = format!("http://{proxy_addr}");
 
     // Build NO_PROXY list:
-    // - 127.0.0.1/localhost: guard hook calls and local services must not loop through proxy
-    // - Agent API endpoints: so the agent can communicate with its own backend
-    let agent_domains = match agent {
-        "claude" => ",api.anthropic.com,console.anthropic.com,sentry.io,statsig.anthropic.com",
-        "codex" => ",api.openai.com,sentry.io",
-        _ => "",
+    // - For Claude/Codex: include localhost so guard hook calls don't loop through proxy,
+    //   plus their backend API domains.
+    // - For generic agents (sqlmap, scripts, etc.): NO localhost bypass — all traffic
+    //   must flow through the proxy, even to localhost targets.
+    let no_proxy = match agent {
+        "claude" => "127.0.0.1,localhost,::1,api.anthropic.com,console.anthropic.com,sentry.io,statsig.anthropic.com".to_string(),
+        "codex" => "127.0.0.1,localhost,::1,api.openai.com,sentry.io".to_string(),
+        _ => String::new(),
     };
-    let no_proxy = format!("127.0.0.1,localhost,::1{agent_domains}");
 
     // Build the command — sandboxed or plain
     let args_vec: Vec<String> = args.to_vec();

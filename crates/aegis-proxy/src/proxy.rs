@@ -172,7 +172,7 @@ async fn handle_connect(
         // Fall through to tunnel setup
     } else {
         // Scope check (with audit logging)
-        let verdict = handler.engine.evaluate_connect(&host, port);
+        let verdict = handler.config.engine().evaluate_connect(&host, port);
         if verdict.is_deny() {
             tracing::warn!("[BLOCKED] CONNECT {} -> {} ({})", host_port, verdict.reason, verdict.source);
             return blocked_response(&verdict.reason);

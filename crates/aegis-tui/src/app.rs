@@ -3,6 +3,44 @@ use std::time::Instant;
 
 use aegis_core::audit::AuditEntry;
 use aegis_core::decision::Decision;
+use aegis_core::policy::yaml_policy::YamlPolicy;
+
+/// Which screen is active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Screen {
+    Live,
+    Config,
+}
+
+/// State for the config screen.
+pub struct ConfigState {
+    pub preset_names: Vec<String>,
+    pub selected_preset: usize,
+    pub active_preset: Option<String>,
+    pub policy: Option<YamlPolicy>,
+    pub secrets_count: usize,
+    pub strip_env_count: usize,
+    pub scroll: usize,
+    /// Which section is focused: 0=presets, 1=policy display
+    pub focus: usize,
+    pub status_message: Option<String>,
+}
+
+impl ConfigState {
+    pub fn new() -> Self {
+        Self {
+            preset_names: Vec::new(),
+            selected_preset: 0,
+            active_preset: None,
+            policy: None,
+            secrets_count: 0,
+            strip_env_count: 0,
+            scroll: 0,
+            focus: 0,
+            status_message: None,
+        }
+    }
+}
 
 /// Which filter is active in the event table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +95,10 @@ pub struct App {
     // RPS tracking
     rps_timestamps: VecDeque<Instant>,
     pub rps: u64,
+    /// Current screen
+    pub screen: Screen,
+    /// Config screen state
+    pub config_state: ConfigState,
 }
 
 impl App {
@@ -75,6 +117,8 @@ impl App {
             detail_scroll: 0,
             rps_timestamps: VecDeque::new(),
             rps: 0,
+            screen: Screen::Live,
+            config_state: ConfigState::new(),
         }
     }
 

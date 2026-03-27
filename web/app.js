@@ -345,6 +345,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
 
     document.getElementById('live-section').style.display = currentMode === 'live' ? '' : 'none';
     document.getElementById('logs-section').style.display = currentMode === 'logs' ? '' : 'none';
+    document.getElementById('config-section').style.display = currentMode === 'config' ? '' : 'none';
 
     if (currentMode === 'live') {
       // Restore live session stats to main cards
@@ -354,6 +355,8 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       statRps.textContent = lastSecondCount;
     } else if (currentMode === 'logs') {
       fetchLogFiles();
+    } else if (currentMode === 'config') {
+      fetchConfig();
     }
   });
 });
@@ -468,6 +471,327 @@ function renderLogEntries() {
     logEventsBody.appendChild(createEventRow(entry));
   });
 }
+
+// === CONFIG TAB ===
+
+let currentConfig = null;
+
+async function fetchConfig() {
+  try {
+    const [configResp, presetsResp] = await Promise.all([
+      fetch(`${API_BASE}/api/config`),
+      fetch(`${API_BASE}/api/config/presets`),
+    ]);
+    const config = await configResp.json();
+    const presets = await presetsResp.json();
+    currentConfig = config;
+    renderConfig(config, presets);
+  } catch (e) {
+    console.error('Failed to fetch config:', e);
+  }
+}
+
+function renderConfig(config, presets) {
+  // Presets dropdown
+  const presetSelect = document.getElementById('preset-select');
+  presetSelect.innerHTML = '<option value="">SELECT PRESET...</option>';
+  (presets.presets || []).forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p.toUpperCase();
+    if (p === presets.active) opt.selected = true;
+    presetSelect.appendChild(opt);
+  });
+
+  // Active preset badge
+  const badge = document.getElementById('active-preset-badge');
+  badge.textContent = config.preset ? config.preset.toUpperCase() : '';
+
+  // HTTP policy
+  const policy = config.policy || {};
+  const http = policy.http || {};
+  const methods = http.methods || {};
+  const payload = http.payload || {};
+  document.getElementById('http-safe').textContent = (methods.safe || []).join(', ') || '-';
+  document.getElementById('http-inspect').textContent = (methods.inspect || []).join(', ') || '-';
+  document.getElementById('http-block').textContent = (methods.block || []).join(', ') || '-';
+  document.getElementById('http-block-sql').textContent = (payload.block_sql || []).join(', ') || '-';
+  document.getElementById('http-allow-sql').textContent = (payload.allow_sql || []).join(', ') || '-';
+  document.getElementById('http-block-cmds').textContent = (payload.block_commands || []).join(', ') || '-';
+  document.getElementById('http-max-body').textContent = http.max_request_body != null ? `${http.max_request_body} bytes` : '-';
+
+  // Shell policy
+  const shell = policy.shell || {};
+  document.getElementById('shell-patterns').textContent = (shell.block_patterns || []).join(', ') || '-';
+  document.getElementById('shell-sql').textContent = shell.block_sql_in_cli ? 'BLOCKED' : 'ALLOWED';
+  document.getElementById('shell-sql').className = 'config-value ' + (shell.block_sql_in_cli ? 'enabled' : 'disabled');
+
+  // Rate limit
+  const rl = policy.rate_limit || {};
+  document.getElementById('rl-rps').textContent = rl.requests_per_second != null ? rl.requests_per_second : '-';
+  document.getElementById('rl-burst').textContent = rl.burst != null ? rl.burst : '-';
+  document.getElementById('rl-per-target').textContent = rl.per_target ? 'YES' : 'NO';
+  document.getElementById('rl-per-target').className = 'config-value ' + (rl.per_target ? 'enabled' : '');
+
+  // Secrets
+  const secrets = config.secrets || {};
+  const secretsList = document.getElementById('secrets-list');
+  const rules = secrets.rules || [];
+  if (rules.length === 0) {
+    secretsList.innerHTML = '<div class="empty-state" style="padding:20px"><p>NO SECRETS CONFIGURED</p></div>';
+  } else {
+    secretsList.innerHTML = rules.map(r => `
+      <div class="secret-item">
+        <div class="secret-info">
+          <span class="secret-name">${escapeHtml(r.name)}</span>
+          <span class="secret-detail">${escapeHtml(r.match_host || '*')}${r.match_path_prefix ? r.match_path_prefix : ''} → ${escapeHtml(r.header)}</span>
+        </div>
+        <button class="secret-remove-btn" onclick="removeSecret('${escapeHtml(r.name)}')">DEL</button>
+      </div>
+    `).join('');
+  }
+}
+
+// Edit toggle
+document.querySelectorAll('.config-edit-btn[data-section]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const section = btn.dataset.section;
+    toggleEdit(section);
+  });
+});
+
+function toggleEdit(section) {
+  const display = document.getElementById(`${section}-display`);
+  const form = document.getElementById(`${section}-form`);
+  if (!display || !form) return;
+
+  const isEditing = form.style.display !== 'none';
+  if (isEditing) {
+    cancelEdit(section);
+  } else {
+    display.style.display = 'none';
+    form.style.display = '';
+    populateEditForm(section);
+  }
+}
+
+function cancelEdit(section) {
+  document.getElementById(`${section}-display`).style.display = '';
+  document.getElementById(`${section}-form`).style.display = 'none';
+}
+
+function populateEditForm(section) {
+  if (!currentConfig) return;
+  const policy = currentConfig.policy || {};
+
+  if (section === 'http') {
+    const http = policy.http || {};
+    const methods = http.methods || {};
+    const payload = http.payload || {};
+    document.getElementById('http-safe-input').value = (methods.safe || []).join(', ');
+    document.getElementById('http-inspect-input').value = (methods.inspect || []).join(', ');
+    document.getElementById('http-block-input').value = (methods.block || []).join(', ');
+    document.getElementById('http-block-sql-input').value = (payload.block_sql || []).join(', ');
+    document.getElementById('http-allow-sql-input').value = (payload.allow_sql || []).join(', ');
+    document.getElementById('http-block-cmds-input').value = (payload.block_commands || []).join(', ');
+    document.getElementById('http-max-body-input').value = http.max_request_body || '';
+  } else if (section === 'shell') {
+    const shell = policy.shell || {};
+    document.getElementById('shell-patterns-input').value = (shell.block_patterns || []).join(', ');
+    document.getElementById('shell-sql-input').value = shell.block_sql_in_cli ? 'true' : 'false';
+  } else if (section === 'rate-limit') {
+    const rl = policy.rate_limit || {};
+    document.getElementById('rl-rps-input').value = rl.requests_per_second || '';
+    document.getElementById('rl-burst-input').value = rl.burst || '';
+    document.getElementById('rl-per-target-input').value = rl.per_target ? 'true' : 'false';
+  }
+}
+
+function parseList(val) {
+  return val.split(',').map(s => s.trim()).filter(s => s.length > 0);
+}
+
+async function saveHttpPolicy() {
+  if (!currentConfig) return;
+  const policy = JSON.parse(JSON.stringify(currentConfig.policy || {}));
+  policy.http = policy.http || {};
+  policy.http.methods = policy.http.methods || {};
+  policy.http.payload = policy.http.payload || {};
+  policy.http.methods.safe = parseList(document.getElementById('http-safe-input').value);
+  policy.http.methods.inspect = parseList(document.getElementById('http-inspect-input').value);
+  policy.http.methods.block = parseList(document.getElementById('http-block-input').value);
+  policy.http.payload.block_sql = parseList(document.getElementById('http-block-sql-input').value);
+  policy.http.payload.allow_sql = parseList(document.getElementById('http-allow-sql-input').value);
+  policy.http.payload.block_commands = parseList(document.getElementById('http-block-cmds-input').value);
+  const maxBody = parseInt(document.getElementById('http-max-body-input').value);
+  policy.http.max_request_body = isNaN(maxBody) ? 0 : maxBody;
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/config/policy`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(policy),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      cancelEdit('http');
+      fetchConfig();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
+async function saveShellPolicy() {
+  if (!currentConfig) return;
+  const policy = JSON.parse(JSON.stringify(currentConfig.policy || {}));
+  policy.shell = policy.shell || {};
+  policy.shell.block_patterns = parseList(document.getElementById('shell-patterns-input').value);
+  policy.shell.block_sql_in_cli = document.getElementById('shell-sql-input').value === 'true';
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/config/policy`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(policy),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      cancelEdit('shell');
+      fetchConfig();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
+async function saveRateLimit() {
+  const rps = parseInt(document.getElementById('rl-rps-input').value);
+  const burst = parseInt(document.getElementById('rl-burst-input').value);
+  const perTarget = document.getElementById('rl-per-target-input').value === 'true';
+
+  if (isNaN(rps) || isNaN(burst)) {
+    alert('RPS and Burst must be numbers');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/config/rate-limit`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests_per_second: rps, burst: burst, per_target: perTarget }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      cancelEdit('rate-limit');
+      fetchConfig();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
+// Secrets
+document.getElementById('add-secret-btn').addEventListener('click', () => {
+  const form = document.getElementById('secret-add-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+});
+
+function cancelSecretAdd() {
+  document.getElementById('secret-add-form').style.display = 'none';
+  document.getElementById('secret-name-input').value = '';
+  document.getElementById('secret-host-input').value = '';
+  document.getElementById('secret-path-input').value = '';
+  document.getElementById('secret-header-input').value = '';
+  document.getElementById('secret-value-input').value = '';
+}
+
+async function saveSecret() {
+  const name = document.getElementById('secret-name-input').value.trim();
+  const host = document.getElementById('secret-host-input').value.trim();
+  const path = document.getElementById('secret-path-input').value.trim();
+  const header = document.getElementById('secret-header-input').value.trim();
+  const value = document.getElementById('secret-value-input').value;
+
+  if (!name || !host || !header || !value) {
+    alert('Name, Host, Header, and Value are required');
+    return;
+  }
+
+  const rule = {
+    name: name,
+    match_host: host,
+    header: header,
+    value: value,
+  };
+  if (path) rule.match_path_prefix = path;
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/config/secrets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rule),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      cancelSecretAdd();
+      fetchConfig();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
+async function removeSecret(name) {
+  if (!confirm(`Remove secret "${name}"?`)) return;
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/config/secrets/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      fetchConfig();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed to remove: ' + e.message);
+  }
+}
+
+// Preset apply
+document.getElementById('apply-preset-btn').addEventListener('click', async () => {
+  const preset = document.getElementById('preset-select').value;
+  if (!preset) {
+    alert('Select a preset first');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/config/presets/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset: preset }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      fetchConfig();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed to apply preset: ' + e.message);
+  }
+});
 
 // Initialize — live feed starts at 0, counts only new WebSocket events
 connect();

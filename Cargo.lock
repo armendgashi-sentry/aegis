@@ -127,6 +127,7 @@ name = "aegis-web"
 version = "0.1.0"
 dependencies = [
  "aegis-core",
+ "aegis-proxy",
  "aegis-sandbox",
  "anyhow",
  "axum",

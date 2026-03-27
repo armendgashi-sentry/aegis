@@ -237,7 +237,7 @@ fn draw_filter_bar(f: &mut Frame, area: Rect, current: Filter, file_name: Option
         (Some(name), true) => format!("   ◆ {name}   [Enter] close  [↑↓] detail scroll  [Esc] back"),
         (Some(name), false) => format!("   ◆ {name}   [TAB] filter  [↑↓] scroll  [Enter] expand  [q] quit"),
         (_, true) => "   [Enter] close  [↑↓] scroll detail  [Esc] back".into(),
-        (_, false) => "   [TAB] filter  [↑↓] scroll  [Enter] expand  [q] quit".into(),
+        (_, false) => "   [TAB] filter  [↑↓] scroll  [Enter] expand  [c] config  [q] quit".into(),
     };
     spans.push(Span::styled(hint, Style::default().fg(theme::TEXT_DIM).bg(theme::BG)));
 

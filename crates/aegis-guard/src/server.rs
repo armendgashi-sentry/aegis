@@ -10,20 +10,20 @@ use axum::Router;
 
 use aegis_core::analyzer::ShellContext;
 use aegis_core::decision::Decision;
-use aegis_core::policy::PolicyEngine;
+use aegis_core::runtime::RuntimeConfig;
 
 use crate::hook;
 
 struct GuardState {
-    engine: Arc<PolicyEngine>,
+    config: Arc<RuntimeConfig>,
 }
 
 /// Start the shell guard HTTP server.
 pub async fn start_guard_server(
     listen_addr: SocketAddr,
-    engine: Arc<PolicyEngine>,
+    config: Arc<RuntimeConfig>,
 ) -> anyhow::Result<()> {
-    let state = Arc::new(GuardState { engine });
+    let state = Arc::new(GuardState { config });
 
     let app = Router::new()
         .route("/hook", post(handle_hook))
@@ -53,7 +53,7 @@ async fn handle_hook(
                 json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?"),
                 json.get("hook_event_name").and_then(|v| v.as_str()).unwrap_or("?"),
             );
-            evaluate_hook(&state.engine, &json)
+            evaluate_hook(&state.config, &json)
         }
         Err(e) => {
             tracing::warn!("Guard hook: failed to parse JSON: {}", e);
@@ -80,7 +80,7 @@ async fn handle_hook_claude(
                 json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?"),
                 json.get("hook_event_name").and_then(|v| v.as_str()).unwrap_or("?"),
             );
-            evaluate_hook(&state.engine, &json)
+            evaluate_hook(&state.config, &json)
         }
         Err(e) => {
             tracing::warn!("Guard hook (claude): failed to parse JSON: {}", e);
@@ -101,7 +101,7 @@ async fn handle_hook_codex(
     let (decision, reason) = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(json) => {
             tracing::debug!("Guard hook (codex) received: {}", json);
-            evaluate_hook(&state.engine, &json)
+            evaluate_hook(&state.config, &json)
         }
         Err(e) => {
             tracing::warn!("Guard hook (codex): failed to parse JSON: {}", e);
@@ -123,7 +123,7 @@ async fn handle_fallback(req: axum::extract::Request) -> (StatusCode, &'static s
     (StatusCode::NOT_FOUND, "Not found")
 }
 
-fn evaluate_hook(engine: &PolicyEngine, body: &serde_json::Value) -> (Decision, String) {
+fn evaluate_hook(config: &RuntimeConfig, body: &serde_json::Value) -> (Decision, String) {
     let tool_name = hook::extract_tool_name(body).unwrap_or_default();
 
     // For Bash/shell tools, analyze the command
@@ -136,6 +136,7 @@ fn evaluate_hook(engine: &PolicyEngine, body: &serde_json::Value) -> (Decision, 
             };
 
             tracing::debug!("Guard evaluating shell command: {:?}", ctx.command);
+            let engine = config.engine();
             let verdict = engine.evaluate_shell(&ctx);
 
             if verdict.is_deny() {

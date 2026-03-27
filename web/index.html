@@ -45,6 +45,7 @@
     <section class="mode-tabs">
       <button class="mode-btn active" data-mode="live">// LIVE FEED</button>
       <button class="mode-btn" data-mode="logs">// LOGS</button>
+      <button class="mode-btn" data-mode="config">// CONFIG</button>
     </section>
 
     <section class="events-section" id="live-section">
@@ -107,6 +108,115 @@
           <div class="empty-state">
             <p>SELECT A LOG FILE...</p>
             <p class="blink">_</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="events-section" id="config-section" style="display: none;">
+      <div class="section-header">
+        <h2>// CONFIGURATION</h2>
+        <div class="filters">
+          <select id="preset-select" class="log-select">
+            <option value="">SELECT PRESET...</option>
+          </select>
+          <button class="filter-btn" id="apply-preset-btn">APPLY</button>
+          <span class="preset-badge" id="active-preset-badge"></span>
+        </div>
+      </div>
+
+      <div class="config-grid">
+        <!-- HTTP Policy -->
+        <div class="config-card" id="config-http">
+          <div class="config-card-header">
+            <span class="config-card-title">// HTTP POLICY</span>
+            <button class="config-edit-btn" data-section="http">EDIT</button>
+          </div>
+          <div class="config-display" id="http-display">
+            <div class="config-row"><span class="config-label">SAFE METHODS</span><span class="config-value" id="http-safe"></span></div>
+            <div class="config-row"><span class="config-label">INSPECT METHODS</span><span class="config-value" id="http-inspect"></span></div>
+            <div class="config-row"><span class="config-label">BLOCK METHODS</span><span class="config-value" id="http-block"></span></div>
+            <div class="config-row"><span class="config-label">BLOCK SQL</span><span class="config-value" id="http-block-sql"></span></div>
+            <div class="config-row"><span class="config-label">ALLOW SQL</span><span class="config-value" id="http-allow-sql"></span></div>
+            <div class="config-row"><span class="config-label">BLOCK COMMANDS</span><span class="config-value" id="http-block-cmds"></span></div>
+            <div class="config-row"><span class="config-label">MAX BODY SIZE</span><span class="config-value" id="http-max-body"></span></div>
+          </div>
+          <div class="config-form" id="http-form" style="display: none;">
+            <div class="config-form-row"><label>SAFE</label><input type="text" id="http-safe-input" class="config-input" /></div>
+            <div class="config-form-row"><label>INSPECT</label><input type="text" id="http-inspect-input" class="config-input" /></div>
+            <div class="config-form-row"><label>BLOCK</label><input type="text" id="http-block-input" class="config-input" /></div>
+            <div class="config-form-row"><label>BLOCK SQL</label><input type="text" id="http-block-sql-input" class="config-input" /></div>
+            <div class="config-form-row"><label>ALLOW SQL</label><input type="text" id="http-allow-sql-input" class="config-input" /></div>
+            <div class="config-form-row"><label>BLOCK CMDS</label><input type="text" id="http-block-cmds-input" class="config-input" /></div>
+            <div class="config-form-row"><label>MAX BODY</label><input type="number" id="http-max-body-input" class="config-input" /></div>
+            <div class="config-form-actions">
+              <button class="filter-btn" onclick="saveHttpPolicy()">SAVE</button>
+              <button class="filter-btn" onclick="cancelEdit('http')">CANCEL</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Shell Policy -->
+        <div class="config-card" id="config-shell">
+          <div class="config-card-header">
+            <span class="config-card-title">// SHELL POLICY</span>
+            <button class="config-edit-btn" data-section="shell">EDIT</button>
+          </div>
+          <div class="config-display" id="shell-display">
+            <div class="config-row"><span class="config-label">BLOCK PATTERNS</span><span class="config-value" id="shell-patterns"></span></div>
+            <div class="config-row"><span class="config-label">BLOCK SQL IN CLI</span><span class="config-value" id="shell-sql"></span></div>
+          </div>
+          <div class="config-form" id="shell-form" style="display: none;">
+            <div class="config-form-row"><label>PATTERNS</label><input type="text" id="shell-patterns-input" class="config-input" /></div>
+            <div class="config-form-row"><label>SQL IN CLI</label><select id="shell-sql-input" class="config-input"><option value="true">BLOCK</option><option value="false">ALLOW</option></select></div>
+            <div class="config-form-actions">
+              <button class="filter-btn" onclick="saveShellPolicy()">SAVE</button>
+              <button class="filter-btn" onclick="cancelEdit('shell')">CANCEL</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rate Limit -->
+        <div class="config-card" id="config-rate-limit">
+          <div class="config-card-header">
+            <span class="config-card-title">// RATE LIMIT</span>
+            <button class="config-edit-btn" data-section="rate-limit">EDIT</button>
+          </div>
+          <div class="config-display" id="rate-limit-display">
+            <div class="config-row"><span class="config-label">REQUESTS/SEC</span><span class="config-value" id="rl-rps"></span></div>
+            <div class="config-row"><span class="config-label">BURST</span><span class="config-value" id="rl-burst"></span></div>
+            <div class="config-row"><span class="config-label">PER TARGET</span><span class="config-value" id="rl-per-target"></span></div>
+          </div>
+          <div class="config-form" id="rate-limit-form" style="display: none;">
+            <div class="config-form-row"><label>RPS</label><input type="number" id="rl-rps-input" class="config-input" /></div>
+            <div class="config-form-row"><label>BURST</label><input type="number" id="rl-burst-input" class="config-input" /></div>
+            <div class="config-form-row"><label>PER TARGET</label><select id="rl-per-target-input" class="config-input"><option value="true">YES</option><option value="false">NO</option></select></div>
+            <div class="config-form-actions">
+              <button class="filter-btn" onclick="saveRateLimit()">SAVE</button>
+              <button class="filter-btn" onclick="cancelEdit('rate-limit')">CANCEL</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secrets -->
+        <div class="config-card" id="config-secrets">
+          <div class="config-card-header">
+            <span class="config-card-title">// SECRETS</span>
+            <button class="config-edit-btn" id="add-secret-btn">+ ADD</button>
+          </div>
+          <div class="config-display" id="secrets-display">
+            <div id="secrets-list"></div>
+          </div>
+          <div class="config-form" id="secret-add-form" style="display: none;">
+            <div class="config-form-row"><label>NAME</label><input type="text" id="secret-name-input" class="config-input" placeholder="e.g. github-api" /></div>
+            <div class="config-form-row"><label>HOST</label><input type="text" id="secret-host-input" class="config-input" placeholder="e.g. api.github.com" /></div>
+            <div class="config-form-row"><label>PATH PREFIX</label><input type="text" id="secret-path-input" class="config-input" placeholder="optional, e.g. /api/v2" /></div>
+            <div class="config-form-row"><label>HEADER</label><input type="text" id="secret-header-input" class="config-input" placeholder="e.g. Authorization" /></div>
+            <div class="config-form-row"><label>VALUE</label><input type="password" id="secret-value-input" class="config-input" placeholder="e.g. Bearer sk-xxx" /></div>
+            <div class="config-form-actions">
+              <button class="filter-btn" onclick="saveSecret()">SAVE</button>
+              <button class="filter-btn" onclick="cancelSecretAdd()">CANCEL</button>
+            </div>
           </div>
         </div>
       </div>

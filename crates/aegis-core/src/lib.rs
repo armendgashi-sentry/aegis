@@ -6,5 +6,6 @@ pub mod audit;
 pub mod analyzer;
 pub mod policy;
 pub mod decode;
+pub mod runtime;
 pub mod secrets;
 pub mod session;
