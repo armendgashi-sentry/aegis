@@ -165,6 +165,8 @@ pub struct App {
     pub status_message: Option<(String, Instant)>,
     /// Replay editor state (populated when user presses R)
     pub replay_editor: Option<ReplayEditor>,
+    /// Remote API base URL for watch mode (e.g., "http://127.0.0.1:19002")
+    pub remote_api_base: Option<String>,
 }
 
 impl App {
@@ -189,6 +191,7 @@ impl App {
             search_query: String::new(),
             status_message: None,
             replay_editor: None,
+            remote_api_base: None,
         }
     }
 

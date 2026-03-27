@@ -100,6 +100,15 @@ pub async fn run_watch(ws_url: &str) -> anyhow::Result<()> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(ws_url).await?;
     let (_, mut read) = ws_stream.split();
 
+    // Derive HTTP base URL from ws:// URL (e.g., ws://127.0.0.1:19002/api/live -> http://127.0.0.1:19002)
+    let api_base = ws_url
+        .replace("ws://", "http://")
+        .replace("wss://", "https://")
+        .split("/api/")
+        .next()
+        .unwrap_or("http://127.0.0.1:19002")
+        .to_string();
+
     enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
     io::stdout().execute(EnableMouseCapture)?;
@@ -108,16 +117,34 @@ pub async fn run_watch(ws_url: &str) -> anyhow::Result<()> {
     terminal.clear()?;
 
     let mut app = App::new();
+    app.remote_api_base = Some(api_base);
 
     loop {
         let table_height = calc_table_height(&terminal, &app)?;
 
-        terminal.draw(|f| ui::draw_live(f, &app))?;
+        terminal.draw(|f| match app.screen {
+            Screen::Live => ui::draw_live(f, &app),
+            Screen::Config => config_ui::draw_config(f, &app),
+            Screen::ReplayEdit => ui::draw_replay_editor(f, &app),
+        })?;
 
         if crossterm::event::poll(Duration::from_millis(50))? {
-            // Watch mode has no RuntimeConfig (remote viewer)
-            if handle_input(&mut app, table_height, None)? {
-                break;
+            match app.screen {
+                Screen::Live => {
+                    if handle_input(&mut app, table_height, None)? {
+                        break;
+                    }
+                }
+                Screen::Config => {
+                    if handle_config_input(&mut app, None)? {
+                        break;
+                    }
+                }
+                Screen::ReplayEdit => {
+                    if handle_replay_edit_input(&mut app, None)? {
+                        break;
+                    }
+                }
             }
         }
 
@@ -412,6 +439,8 @@ fn handle_input(
                     KeyCode::Char('c') => {
                         if config.is_some() {
                             switch_to_config(app, config);
+                        } else if app.remote_api_base.is_some() {
+                            switch_to_config_remote(app);
                         }
                     }
                     KeyCode::Tab => app.cycle_filter(),
@@ -730,7 +759,12 @@ fn switch_to_config(app: &mut App, config: Option<&Arc<RuntimeConfig>>) {
 /// Apply the currently selected preset.
 fn apply_selected_preset(app: &mut App, config: Option<&Arc<RuntimeConfig>>) {
     let Some(cfg) = config else {
-        app.config_state.status_message = Some("No RuntimeConfig available".into());
+        // Try remote API in watch mode
+        if app.remote_api_base.is_some() {
+            apply_preset_remote(app);
+        } else {
+            app.config_state.status_message = Some("No RuntimeConfig available".into());
+        }
         return;
     };
 
@@ -747,6 +781,91 @@ fn apply_selected_preset(app: &mut App, config: Option<&Arc<RuntimeConfig>>) {
             app.config_state.active_preset = Some(preset_name.clone());
             app.config_state.policy = Some(cfg.policy_snapshot());
             app.config_state.status_message = Some(format!("Applied preset: {preset_name}"));
+        }
+        Err(e) => {
+            app.config_state.status_message = Some(format!("Error: {e}"));
+        }
+    }
+}
+
+/// Fetch config from remote API and switch to config screen (watch mode).
+fn switch_to_config_remote(app: &mut App) {
+    let Some(ref base) = app.remote_api_base else { return };
+    let url = format!("{base}/api/config");
+
+    match reqwest::blocking::get(&url) {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>() {
+                let cs = &mut app.config_state;
+
+                // Parse preset info
+                if let Some(presets) = json.get("available_presets").and_then(|v| v.as_array()) {
+                    cs.preset_names = presets
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect();
+                }
+                cs.active_preset = json.get("preset").and_then(|v| v.as_str()).map(String::from);
+
+                if let Some(ref active) = cs.active_preset {
+                    cs.selected_preset = cs.preset_names.iter()
+                        .position(|p| p == active)
+                        .unwrap_or(0);
+                }
+
+                // Parse policy
+                if let Some(policy_val) = json.get("policy") {
+                    if let Ok(policy) = serde_json::from_value(policy_val.clone()) {
+                        cs.policy = Some(policy);
+                    }
+                }
+
+                // Parse secrets info
+                if let Some(secrets) = json.get("secrets") {
+                    cs.secrets_count = secrets.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    cs.strip_env_count = secrets.get("strip_env_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                }
+
+                cs.scroll = 0;
+                cs.focus = 0;
+                cs.status_message = None;
+            }
+        }
+        Err(e) => {
+            app.config_state.status_message = Some(format!("Failed to fetch config: {e}"));
+        }
+    }
+    app.screen = Screen::Config;
+}
+
+/// Apply preset via remote API (watch mode).
+fn apply_preset_remote(app: &mut App) {
+    let Some(ref base) = app.remote_api_base else { return };
+    let Some(preset_name) = app.config_state.preset_names.get(app.config_state.selected_preset).cloned() else {
+        return;
+    };
+
+    let url = format!("{base}/api/config/presets/apply");
+    let client = reqwest::blocking::Client::new();
+    match client.post(&url).json(&serde_json::json!({"preset": preset_name})).send() {
+        Ok(resp) if resp.status().is_success() => {
+            app.config_state.active_preset = Some(preset_name.clone());
+            app.config_state.status_message = Some(format!("Applied preset: {preset_name}"));
+            // Re-fetch policy to update the display
+            if let Some(ref base) = app.remote_api_base {
+                if let Ok(resp) = reqwest::blocking::get(&format!("{base}/api/config")) {
+                    if let Ok(json) = resp.json::<serde_json::Value>() {
+                        if let Some(policy_val) = json.get("policy") {
+                            if let Ok(policy) = serde_json::from_value(policy_val.clone()) {
+                                app.config_state.policy = Some(policy);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(resp) => {
+            app.config_state.status_message = Some(format!("Error: HTTP {}", resp.status()));
         }
         Err(e) => {
             app.config_state.status_message = Some(format!("Error: {e}"));
